@@ -110,7 +110,105 @@ t_untrusted_url_refused() {
   fi
 }
 
-# --- 5. Arch gate via fake uname (Linux only). ---
+# --- 5. Header content: logo, version, developer (portable, no exec). ---
+t_header_content() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local out
+  out="$(print_header "Ready")"
+  if [[ "$out" == *"MULTI-PROVIDER IP INTELLIGENCE"* \
+    && "$out" == *"Version 1.0.0"* \
+    && "$out" == *"Developer: t1_haaa"* \
+    && "$out" == *"Status: Ready"* ]]; then
+    pass "header has logo, version and developer"
+  else
+    fail "header content"
+  fi
+  local width
+  width="$(printf '%s' "$out" | awk '{ if (length > m) m = length } END { print m + 0 }')"
+  if [[ "$width" -le 80 ]]; then
+    pass "header fits 80 columns"
+  else
+    fail "header too wide ($width)"
+  fi
+}
+
+# --- 6. Quiet download flags: curl must stay silent on progress. ---
+t_curl_quiet_flags() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  mkdir -p "$dir/fakebin"
+  cat > "$dir/fakebin/curl" <<'EOF'
+#!/usr/bin/env bash
+echo "CURL-ARGS: $*" >> "$CURL_LOG"
+echo "  % Total    % Received  (fake progress)"
+: > "$CURL_DEST"
+EOF
+  chmod +x "$dir/fakebin/curl"
+  export CURL_LOG="$dir/args.log" CURL_DEST="$dir/out.bin"
+  PATH="$dir/fakebin:$PATH" download_file \
+    "https://github.com/t1-haaaa/IPTraceX/releases/latest/download/x" \
+    "$dir/out.bin" "curl" >/dev/null 2>&1 || true
+  if grep -q "\-sS" "$dir/args.log" && ! grep -q "progress" "$dir/args.log"; then
+    pass "curl invoked quiet (-sS, no progress flags)"
+  else
+    fail "curl flags ($(cat "$dir/args.log"))"
+  fi
+  rm -rf "$dir"
+  unset CURL_LOG CURL_DEST
+}
+
+# --- 7. Download errors stay visible. ---
+t_download_error_visible() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  mkdir -p "$dir/fakebin"
+  printf '#!/usr/bin/env bash\necho "curl: (6) Could not resolve host" >&2\nexit 6\n' \
+    > "$dir/fakebin/curl"
+  chmod +x "$dir/fakebin/curl"
+  local out code
+  set +e
+  out="$(PATH="$dir/fakebin:$PATH" download_file \
+    "https://github.com/t1-haaaa/IPTraceX/releases/latest/download/x" \
+    "$dir/out.bin" "curl" 2>&1)"; code=$?
+  set -e
+  if [[ "$code" -ne 0 && "$out" == *"Could not resolve host"* ]]; then
+    pass "download errors remain visible"
+  else
+    fail "download error visibility (out='$out' code=$code)"
+  fi
+  rm -rf "$dir"
+}
+
+# --- 8. Clear behavior: called when forced, silent when unavailable. ---
+t_clear_behavior() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  mkdir -p "$dir/fakebin"
+  printf '#!/usr/bin/env bash\ntouch "$CLEAR_MARKER"\n' > "$dir/fakebin/clear"
+  chmod +x "$dir/fakebin/clear"
+  export CLEAR_MARKER="$dir/cleared"
+  if IPTraceX_ALWAYS_CLEAR=1 PATH="$dir/fakebin:$PATH" maybe_clear \
+    && [[ -f "$dir/cleared" ]]; then
+    pass "clear invoked when forced"
+  else
+    fail "clear not invoked"
+  fi
+  rm -f "$dir/cleared"
+  if IPTraceX_NO_CLEAR=1 IPTraceX_ALWAYS_CLEAR=1 PATH="$dir/fakebin:$PATH" maybe_clear \
+    && [[ ! -f "$dir/cleared" ]]; then
+    pass "IPTraceX_NO_CLEAR suppresses clear"
+  else
+    fail "no-clear override"
+  fi
+  unset CLEAR_MARKER
+  rm -rf "$dir"
+}
+
+# --- 9. Arch gate via fake uname (Linux only). ---
 t_arch_gate() {
   if is_windows_env; then
     echo "SKIP: arch gate (Windows takes platform path)"
@@ -132,7 +230,7 @@ t_arch_gate() {
   rm -rf "$dir"
 }
 
-# --- 6. Windows platform message (Windows only). ---
+# --- 10. Windows platform message (Windows only). ---
 t_windows_message() {
   if ! is_windows_env; then
     echo "SKIP: windows message (not on Windows)"
@@ -152,7 +250,7 @@ t_windows_message() {
   rm -rf "$dir"
 }
 
-# --- 7. Real download → verify → cache → execute (Linux only, network). ---
+# --- 11. Real download → verify → cache → execute (Linux only, network). ---
 t_real_download_flow() {
   if is_windows_env; then
     echo "SKIP: real download (Windows cannot exec ELF)"
@@ -190,6 +288,10 @@ t_fake_binary_exec
 t_cache_precedence
 t_checksum_verify
 t_untrusted_url_refused
+t_header_content
+t_curl_quiet_flags
+t_download_error_visible
+t_clear_behavior
 t_arch_gate
 t_windows_message
 t_real_download_flow

@@ -5,6 +5,11 @@ Format follows Keep a Changelog; versions follow SemVer.
 
 ## Unreleased
 
+- feat: clean launch experience — terminal clear on interactive start,
+  quiet official-release bootstrap (no curl progress, visible errors),
+  developer branding (`[::] Developer: t1_haaa`), launcher `--debug`
+  details, `IPTraceX_LAUNCHER_UI` de-duplication with the app header.
+
 - fix: production launcher no longer publishes/executes a Linux ELF binary
   on Windows (clear unsupported-platform message instead); canonical binary
   name `IPTraceX` staged next to `iptracex.sh`; dev publish moved to

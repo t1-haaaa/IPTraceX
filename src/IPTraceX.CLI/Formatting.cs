@@ -44,7 +44,16 @@ public static class Formatting
         => "\n" + AsciiBanner(p) + "\n\n"
             + $"{p.TokenInfo()} Multi-provider IP intelligence & geolocation CLI\n"
             + $"{p.TokenInfo()} Version {version}\n"
+            + $"{p.TokenInfo()} Developer: t1_haaa\n"
             + $"{p.TokenOk()} Status: Ready\n";
+
+    /// <summary>
+    /// The launcher prints this same header while bootstrapping; when it
+    /// already did (IPTraceX_LAUNCHER_UI=1), the app skips it to avoid a
+    /// duplicated logo. Direct binary runs always show it.
+    /// </summary>
+    public static bool StartupShownByLauncher()
+        => Environment.GetEnvironmentVariable("IPTraceX_LAUNCHER_UI") == "1";
 
     public static string? StageLine(Palette p, string stage)
         => stage switch

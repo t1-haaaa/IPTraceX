@@ -46,6 +46,30 @@ public sealed class UiTests
     }
 
     [Fact]
+    public void StartupShowsDeveloper()
+    {
+        string text = Formatting.Startup(Plain, "1.0.0");
+        Assert.Contains("Developer: t1_haaa", text);
+        Assert.Contains("Version 1.0.0", text);
+    }
+
+    [Fact]
+    public void LauncherHeaderSuppressesDuplicateStartup()
+    {
+        Assert.False(Formatting.StartupShownByLauncher());
+        string? previous = Environment.GetEnvironmentVariable("IPTraceX_LAUNCHER_UI");
+        try
+        {
+            Environment.SetEnvironmentVariable("IPTraceX_LAUNCHER_UI", "1");
+            Assert.True(Formatting.StartupShownByLauncher());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("IPTraceX_LAUNCHER_UI", previous);
+        }
+    }
+
+    [Fact]
     public void MenuNumberingAndSections()
     {
         string menu = Formatting.InteractiveMenu(Plain, true);

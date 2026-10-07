@@ -10,6 +10,8 @@ A modern multi-provider IP intelligence and geolocation CLI for Linux.
 Three independent GeoIP sources. One honest answer — with consensus,
 confidence scoring, and every disagreement shown, never hidden.
 
+Maintained by **t1_haaa**.
+
 ```
    ___ ____ _____                    __  __
   |_ _|  _ \_   _| __ __ _  ___  ___\ \/ /
@@ -20,6 +22,7 @@ confidence scoring, and every disagreement shown, never hidden.
         MULTI-PROVIDER IP INTELLIGENCE & GEOLOCATION CLI
 
 [::] Version 1.0.0
+[::] Developer: t1_haaa
 [+] Status: Ready
 
 [?] Enter public IP address:
@@ -97,11 +100,21 @@ chmod +x iptracex.sh
 
 No .NET install needed to run. No root, no sudo.
 
-On first run without a local binary, `./iptracex.sh` automatically
-downloads the official Linux release (`iptracex-linux-x64.tar.gz` from
-`t1-haaaa/IPTraceX`), verifies its SHA256 checksum, caches it under
-`.iptracex/bin/`, and executes it. Later runs reuse the cache — no
-network needed, no re-download. Force a refresh anytime:
+On first run without a local binary, `./iptracex.sh` clears the screen,
+shows the IPTraceX header, then quietly downloads the official Linux
+release (`iptracex-linux-x64.tar.gz` from `t1-haaaa/IPTraceX`), verifies
+its SHA256 checksum, caches it under `.iptracex/bin/`, and executes it:
+
+```
+[::] Downloading official release...
+[+] Download complete.
+[::] Verifying release...
+[+] SHA256 verified.
+[+] IPTraceX is ready.
+```
+
+No curl progress noise; errors stay visible. Later runs reuse the cache —
+no network needed, no re-download. Force a refresh anytime:
 
 ```bash
 ./iptracex.sh --update
@@ -319,6 +332,7 @@ Each release ships:
 | `[ERROR] Unable to download IPTraceX.` | No network or no curl/wget — check connection or place an `IPTraceX` binary next to `iptracex.sh` for offline use. |
 | `[ERROR] SHA256 verification failed.` | Untrusted download deleted automatically; retry or use an offline binary. |
 | `[ERROR] IPTraceX Linux binary not found.` | No local binary and download impossible — see above. |
+| `zsh: corrupt history file ~/.zsh_history` | A shell-level issue, unrelated to IPTraceX. IPTraceX never touches shell history — it only clears the visible screen on interactive start. |
 
 ## Contributing
 

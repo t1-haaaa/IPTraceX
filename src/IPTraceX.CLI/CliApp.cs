@@ -538,7 +538,11 @@ public sealed class CliApp
 
     public async Task<int> RunInteractiveAsync(CancellationToken ct)
     {
-        _output.WriteLine(Formatting.Startup(_palette, AppInfo.Version));
+        if (!Formatting.StartupShownByLauncher())
+        {
+            _output.WriteLine(Formatting.Startup(_palette, AppInfo.Version));
+        }
+
         GeoResult? current = null;
 
         void Progress(string stage)
