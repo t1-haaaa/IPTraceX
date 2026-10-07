@@ -63,7 +63,7 @@ print_header() {
   c_yellow '|_ _|  _ \_   _| __ __ _  ___  ___\ \/ /'; echo
   c_yellow $' | | | |_) || | | \'__/ _` |/ __|/ _ \\  /'; echo
   c_yellow ' | | |  __/ | | | | | (_| | (__  __/ /  '$'\x5c'; echo
-  c_yellow '|___|_|    |_||_|  \__,_|\___\___/_/\_\'; echo
+  c_yellow '|___|_|    |_||_|  \__,_|\___\___/_/\_'$'\x5c'; echo
   echo
   echo 'MULTI-PROVIDER IP INTELLIGENCE & GEOLOCATION CLI'
   echo
