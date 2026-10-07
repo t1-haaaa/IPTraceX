@@ -80,7 +80,7 @@ EOF
 
 # --- 3. Checksum verification unit (sourced functions, offline). ---
 t_checksum_verify() {
-  # shellcheck disable=SC1091
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
   source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
   local dir; dir="$(mktemp -d)"
   echo "hello" > "$dir/a.txt"
@@ -101,7 +101,7 @@ t_checksum_verify() {
 
 # --- 4. Untrusted URL refusal (offline). ---
 t_untrusted_url_refused() {
-  # shellcheck disable=SC1091
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
   source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
   if download_file "http://evil.example/x" "$HOME/nope" "curl" >/dev/null 2>&1; then
     fail "untrusted URL accepted"
@@ -120,7 +120,7 @@ t_arch_gate() {
   mkdir -p "$fakebin"
   printf '#!/usr/bin/env bash\necho aarch64\n' > "$fakebin/uname"
   chmod +x "$fakebin/uname"
-  # shellcheck disable=SC1091
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
   source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
   local out
   out="$(PATH="$fakebin:$PATH" check_arch 2>&1)" && code=0 || code=$?
