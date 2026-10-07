@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>iptracex</AssemblyName>
+    <RootNamespace>IPTraceX.CLI</RootNamespace>
+    <!-- Self-contained linux-x64 single file for Kali (dotnet publish). -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+    <ProjectReference Include="..\IPTraceX.Core\IPTraceX.Core.csproj" />
+    <ProjectReference Include="..\IPTraceX.Infrastructure\IPTraceX.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

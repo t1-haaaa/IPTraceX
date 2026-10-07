@@ -1,0 +1,45 @@
+
+[+] IP INFORMATION
+    Address      : 8.8.8.8
+    Version      : IPv4
+    Type         : Public
+
+[+] GEOLOCATION
+    Country      : United States
+    Country Code : US
+    Region       : California
+    Region Code  : CA
+    City         : Mountain View
+    Postal Code  : 94043
+    Latitude     : 37.590401299999996
+    Longitude    : -122.03193576666668
+    Timezone     : America/Los_Angeles
+
+[+] NETWORK
+    ISP          : Google LLC
+    Organization : Google LLC
+    ASN          : AS15169
+    AS Name      : Google LLC
+    Hostname     : google.com
+
+[+] GOOGLE MAPS
+
+    https://www.google.com/maps?q=37.590401299999996,-122.03193576666668
+
+[+] GEOIP QUALITY
+    Providers    : 3/3
+    Agreement    : 2/3
+    Confidence   : MEDIUM
+    Source       : Multi-provider consensus
+
+[!] GEOIP PROVIDER DISAGREEMENT
+
+    ipwho.is     : United States / California
+    ipapi.co     : United States / California
+    ipinfo.io    : US / California
+
+[!] NOTE
+    IP geolocation is approximate.
+    It does not identify an exact physical address,
+    person, or real-time device location.
+
