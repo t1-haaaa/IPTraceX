@@ -4,6 +4,8 @@ obj/
 publish/
 # Packaged self-contained binary (release artifact, never committed).
 /IPTraceX
+# Launcher download cache (populated at runtime, never committed).
+/.iptracex/
 *.user
 *.suo
 .vs/

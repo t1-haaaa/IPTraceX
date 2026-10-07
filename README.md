@@ -97,6 +97,16 @@ chmod +x iptracex.sh
 
 No .NET install needed to run. No root, no sudo.
 
+On first run without a local binary, `./iptracex.sh` automatically
+downloads the official Linux release (`iptracex-linux-x64.tar.gz` from
+`t1-haaaa/IPTraceX`), verifies its SHA256 checksum, caches it under
+`.iptracex/bin/`, and executes it. Later runs reuse the cache — no
+network needed, no re-download. Force a refresh anytime:
+
+```bash
+./iptracex.sh --update
+```
+
 From the GitHub release instead:
 
 ```bash
@@ -270,6 +280,45 @@ Covers IPv4/IPv6, private rejection, invalid input, normalization,
 failures (timeout/429/5xx/malformed/missing), consensus, disagreement,
 confidence, coordinates, JSON contract, CLI modes, no-color, batch,
 dedup, cache isolation, Maps URLs, encoding edges, safe filenames.
+
+Launcher behavior is covered separately (no framework, plain bash):
+
+```bash
+./tests/launcher/run_tests.sh
+```
+
+It checks binary resolution order, argument forwarding, exit codes,
+SHA256 accept/reject, untrusted-URL refusal, arch gating, the Windows
+platform message, and — on Linux with network — the real
+download → verify → cache → execute flow plus cache reuse.
+
+## Building
+
+```bash
+dotnet publish src/IPTraceX.CLI/IPTraceX.CLI.csproj -c Release \
+  -r linux-x64 --self-contained true -p:PublishSingleFile=true \
+  -o publish/linux-x64
+```
+
+or the helper `./scripts/dev-publish-linux.sh` (developers/CI only —
+never called by `iptracex.sh`).
+
+## Release
+
+Each release ships:
+
+- `iptracex-linux-x64.tar.gz` — contains the `IPTraceX` ELF binary
+- `SHA256SUMS` — checksums the launcher verifies before executing
+
+## Troubleshooting
+
+| Symptom | Meaning |
+|---------|---------|
+| `[ERROR] IPTraceX Linux binary cannot run on Windows/Git Bash.` | Expected on Windows — use Kali/WSL/Linux or `dotnet run` for development. Never an `Exec format error`. |
+| `[ERROR] Unsupported architecture: aarch64` | Only linux-x64 releases exist today; no ARM claims. |
+| `[ERROR] Unable to download IPTraceX.` | No network or no curl/wget — check connection or place an `IPTraceX` binary next to `iptracex.sh` for offline use. |
+| `[ERROR] SHA256 verification failed.` | Untrusted download deleted automatically; retry or use an offline binary. |
+| `[ERROR] IPTraceX Linux binary not found.` | No local binary and download impossible — see above. |
 
 ## Contributing
 

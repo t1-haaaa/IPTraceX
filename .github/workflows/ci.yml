@@ -38,6 +38,10 @@ jobs:
           ./IPTraceX --version
           ./iptracex.sh --help
           ./iptracex.sh --version
+      - name: Launcher behavior tests
+        run: |
+          chmod +x tests/launcher/run_tests.sh
+          ./tests/launcher/run_tests.sh
       - name: ShellCheck
         uses: ludeeus/action-shellcheck@master
         with:

@@ -10,6 +10,10 @@ Format follows Keep a Changelog; versions follow SemVer.
   name `IPTraceX` staged next to `iptracex.sh`; dev publish moved to
   `scripts/dev-publish-linux.sh`; `IPTRACEX_*` documented as official with
   `IPGHOST_*` as deprecated alias.
+- feat: launcher auto-bootstrap from the official GitHub Release
+  (HTTPS-only download, SHA256 verified, `.iptracex/bin` cache, `--update`
+  refresh, x86_64 gate, Windows platform guard); launcher behavior tests
+  in `tests/launcher/`; release ships `SHA256SUMS`.
 
 ## 1.0.0 — 2026-10-07
 

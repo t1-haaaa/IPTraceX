@@ -1,5 +1,15 @@
 # Usage
 
+## First run
+
+`./iptracex.sh` resolves the binary as: `./IPTraceX`, then the
+`.iptracex/bin/` cache, then an official GitHub Release download
+(HTTPS + SHA256 verified). No .NET SDK needed. Refresh anytime:
+
+```bash
+./iptracex.sh --update
+```
+
 ## Interactive
 
 ```bash
