@@ -2,7 +2,7 @@
 
 ## Our Pledge
 
-We pledge to make participation in IPGHOST a harassment-free experience for
+We pledge to make participation in IPTraceX a harassment-free experience for
 everyone, regardless of age, body size, disability, ethnicity, gender identity,
 experience level, nationality, personal appearance, race, religion, or sexual
 identity and orientation.

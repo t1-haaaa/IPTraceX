@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>iptracex</AssemblyName>
+    <AssemblyName>IPTraceX</AssemblyName>
     <RootNamespace>IPTraceX.CLI</RootNamespace>
     <!-- Self-contained linux-x64 single file for Kali (dotnet publish). -->
     <PublishSingleFile>true</PublishSingleFile>

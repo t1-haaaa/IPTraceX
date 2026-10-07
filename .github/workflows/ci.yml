@@ -27,9 +27,15 @@ jobs:
           dotnet publish src/IPTraceX.CLI/IPTraceX.CLI.csproj -c Release
           -r linux-x64 --self-contained true -p:PublishSingleFile=true
           -o publish/linux-x64
+      - name: Stage production binary
+        run: |
+          cp publish/linux-x64/IPTraceX ./IPTraceX
+          chmod +x ./IPTraceX
+          file ./IPTraceX
       - name: CLI smoke
         run: |
           chmod +x iptracex.sh
+          ./IPTraceX --version
           ./iptracex.sh --help
           ./iptracex.sh --version
       - name: ShellCheck

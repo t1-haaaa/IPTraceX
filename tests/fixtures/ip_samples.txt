@@ -1,6 +1,6 @@
-# IPGHOST real-world sample corpus (extracted from attached log, deduplicated).
+# IPTraceX real-world sample corpus (extracted from attached log, deduplicated).
 # Public IPs only. Batch skips blank lines and #-comments.
-# Usage: ./ipghost.sh --file tests/fixtures/ip_samples.txt
+# Usage: ./iptracex.sh --file tests/fixtures/ip_samples.txt
 35.164.245.110
 35.94.45.221
 41.107.104.122

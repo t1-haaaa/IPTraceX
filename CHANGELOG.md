@@ -5,6 +5,12 @@ Format follows Keep a Changelog; versions follow SemVer.
 
 ## Unreleased
 
+- fix: production launcher no longer publishes/executes a Linux ELF binary
+  on Windows (clear unsupported-platform message instead); canonical binary
+  name `IPTraceX` staged next to `iptracex.sh`; dev publish moved to
+  `scripts/dev-publish-linux.sh`; `IPTRACEX_*` documented as official with
+  `IPGHOST_*` as deprecated alias.
+
 ## 1.0.0 — 2026-10-07
 
 - Complete migration from Python to C# / .NET 8, renamed IPGHOST → IPTraceX.

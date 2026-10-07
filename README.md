@@ -85,6 +85,9 @@ providers. When sources disagree, it says so — per provider, in the open.
 
 ## Installation
 
+Kali/Linux (from source checkout — the release layout already ships the
+`IPTraceX` binary next to the launcher):
+
 ```bash
 git clone https://github.com/t1-haaaa/IPTraceX.git
 cd IPTraceX
@@ -92,10 +95,25 @@ chmod +x iptracex.sh
 ./iptracex.sh
 ```
 
-First run publishes the self-contained linux-x64 binary (needs .NET 8 SDK
-once); afterwards no .NET install is required to run it. No root, no sudo.
+No .NET install needed to run. No root, no sudo.
 
-Build from source:
+From the GitHub release instead:
+
+```bash
+mkdir IPTraceX && cd IPTraceX
+# download iptracex-linux-x64.tar.gz from the latest release, then:
+tar -xzf iptracex-linux-x64.tar.gz
+chmod +x iptracex.sh
+./iptracex.sh
+```
+
+> [!NOTE]
+> The Linux release binary (`IPTraceX`, linux-x64 ELF) cannot be executed
+> directly from Windows. On Windows Git Bash, `./iptracex.sh` prints a
+> clear unsupported-platform message instead of failing obscurely. Windows
+> development/testing uses `dotnet run --project src/IPTraceX.CLI`.
+
+Build from source (developers):
 
 ```bash
 dotnet restore
@@ -104,7 +122,10 @@ dotnet test
 dotnet publish src/IPTraceX.CLI/IPTraceX.CLI.csproj -c Release \
   -r linux-x64 --self-contained true -p:PublishSingleFile=true \
   -o publish/linux-x64
+cp publish/linux-x64/IPTraceX ./IPTraceX   # staging only, never committed
 ```
+
+Or via helper: `./scripts/dev-publish-linux.sh`.
 
 ## Quick Start
 

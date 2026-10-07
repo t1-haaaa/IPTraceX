@@ -2,6 +2,8 @@
 bin/
 obj/
 publish/
+# Packaged self-contained binary (release artifact, never committed).
+/IPTraceX
 *.user
 *.suo
 .vs/

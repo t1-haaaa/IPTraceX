@@ -11,8 +11,10 @@
 | `IPTRACEX_DEBUG`      | empty                          | `1` shows tracebacks (no secrets)     |
 | `NO_COLOR`            | empty                          | Standard opt-out, also respected      |
 
-Legacy `IPGHOST_*` names are accepted as fallback when the new name is
-unset (backward compatible with the former Python tool).
+`IPTRACEX_PROVIDERS` (and all `IPTRACEX_*` names) are official.
+Legacy `IPGHOST_*` names remain accepted as a deprecated backward-compatible
+alias only when the new name is unset, and may be removed in a future major
+release.
 
 Copy `.env.example` to `.env` for local tweaks. `.env` is git-ignored and
 never overrides real environment variables.
