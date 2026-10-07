@@ -119,7 +119,15 @@ install_binary() {
     return 1
   fi
   arch="$(check_arch)" || return 1
+  mkdir -p "$CACHE_ROOT" || {
+    log_err "[ERROR] Cannot create cache directory: $CACHE_ROOT"
+    return 1
+  }
   tmpdir="$(mktemp -d "$CACHE_ROOT/tmp.XXXXXX")"
+  if [[ -z "${tmpdir:-}" || ! -d "$tmpdir" ]]; then
+    log_err "[ERROR] Cannot create temporary directory under $CACHE_ROOT."
+    return 1
+  fi
   archive="$tmpdir/$ARCHIVE"
   sums="$tmpdir/SHA256SUMS"
   if ! download_file "$TARBALL_URL" "$archive" "$downloader"; then
