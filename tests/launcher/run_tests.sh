@@ -188,6 +188,7 @@ t_clear_behavior() {
   source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
   local dir; dir="$(mktemp -d)"
   mkdir -p "$dir/fakebin"
+  # shellcheck disable=SC2016 # $CLEAR_MARKER must expand when the fake runs, not now
   printf '#!/usr/bin/env bash\ntouch "$CLEAR_MARKER"\n' > "$dir/fakebin/clear"
   chmod +x "$dir/fakebin/clear"
   export CLEAR_MARKER="$dir/cleared"
