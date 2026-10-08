@@ -134,12 +134,152 @@ export async function storeEvents(events: StoredEvent[]): Promise<void> {
           e.metadata ? JSON.stringify(e.metadata) : null,
         ]
       );
+      if (e.severity === "ALERT" || e.severity === "CRITICAL") {
+        await pool.query(
+          `INSERT INTO security_alerts (alert_id, timestamp, rule, severity, reason, count, source, correlation_id, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'NEW') ON CONFLICT (alert_id) DO NOTHING`,
+          [`ALT-${e.event_id}`, e.timestamp, e.event_type, e.severity,
+            e.message ?? e.event_type, 1, e.component ?? null, e.correlation_id ?? null]
+        );
+      }
     }
     return;
   }
   await fs.mkdir(path.dirname(dataFile()), { recursive: true });
   const lines = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
   await fs.appendFile(dataFile(), lines, "utf8");
+  for (const e of events) {
+    if (e.severity === "ALERT" || e.severity === "CRITICAL") {
+      await saveAlert({
+        alert_id: `ALT-${e.event_id}`,
+        timestamp: e.timestamp,
+        rule: e.event_type,
+        severity: e.severity,
+        reason: e.message ?? e.event_type,
+        count: 1,
+        source: e.component ?? null,
+        correlation_id: e.correlation_id ?? null,
+        status: "NEW",
+      });
+    }
+  }
+}
+
+export interface Alert {
+  alert_id: string;
+  timestamp: string;
+  rule: string;
+  severity: string;
+  reason: string;
+  count: number;
+  source?: string | null;
+  correlation_id?: string | null;
+  status: string;
+  changed_by?: string | null;
+  changed_at?: string | null;
+}
+
+function alertsFile(): string {
+  const dir = process.env.AUDIT_DATA_DIR || path.join(process.cwd(), ".audit-data");
+  return path.join(dir, "alerts.json");
+}
+
+async function readAlertsFile(): Promise<Alert[]> {
+  try {
+    const raw = await fs.readFile(alertsFile(), "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Alert[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function auditLog(username: string | null, action: string, details: string): Promise<void> {
+  const pool = await pg();
+  if (pool) {
+    await pool.query(
+      `INSERT INTO dashboard_audit (username, action, details) VALUES ($1,$2,$3)`,
+      [username, action, details]
+    );
+    return;
+  }
+  await fs.mkdir(path.dirname(dataFile()), { recursive: true });
+  await fs.appendFile(
+    dataFile(),
+    JSON.stringify({
+      event_id: `EVT-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      timestamp: new Date().toISOString(),
+      severity: "INFO",
+      event_type: action,
+      category: "dashboard",
+      message: `${username ?? "anonymous"}: ${details}`,
+    }) + "\n",
+    "utf8"
+  );
+}
+
+export async function saveAlert(a: Alert): Promise<void> {
+  const pool = await pg();
+  if (pool) {
+    await pool.query(
+      `INSERT INTO security_alerts (alert_id, timestamp, rule, severity, reason, count, source, correlation_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (alert_id) DO NOTHING`,
+      [a.alert_id, a.timestamp, a.rule, a.severity, a.reason, a.count, a.source ?? null, a.correlation_id ?? null, a.status]
+    );
+    return;
+  }
+  const all = await readAlertsFile();
+  if (!all.some((x) => x.alert_id === a.alert_id)) {
+    all.push(a);
+    await fs.mkdir(path.dirname(alertsFile()), { recursive: true });
+    await fs.writeFile(alertsFile(), JSON.stringify(all), "utf8");
+  }
+}
+
+export async function listAlerts(status?: string, limit = 100): Promise<Alert[]> {
+  const pool = await pg();
+  if (pool) {
+    const res = await pool.query(
+      `SELECT * FROM security_alerts` +
+        (status ? ` WHERE status = $1` : ``) +
+        ` ORDER BY timestamp DESC LIMIT ${Math.min(Math.max(limit, 1), 200)}`,
+      status ? [status] : []
+    );
+    return res.rows as unknown as Alert[];
+  }
+  const all = await readAlertsFile();
+  const filtered = status ? all.filter((a) => a.status === status) : all;
+  return filtered
+    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1))
+    .slice(0, Math.min(Math.max(limit, 1), 200));
+}
+
+export async function setAlertStatus(
+  id: string,
+  status: "ACKNOWLEDGED" | "RESOLVED",
+  username: string
+): Promise<Alert | null> {
+  const pool = await pg();
+  if (pool) {
+    const res = await pool.query(
+      `UPDATE security_alerts SET status = $1, changed_by = $2, changed_at = NOW()
+       WHERE alert_id = $3 RETURNING *`,
+      [status, username, id]
+    );
+    const row = (res.rows as unknown as Alert[])[0] ?? null;
+    if (row) await auditLog(username, status === "ACKNOWLEDGED" ? "ALERT_ACKNOWLEDGED" : "ALERT_RESOLVED", id);
+    return row;
+  }
+  const all = await readAlertsFile();
+  const found = all.find((a) => a.alert_id === id) ?? null;
+  if (found) {
+    found.status = status;
+    found.changed_by = username;
+    found.changed_at = new Date().toISOString();
+    await fs.writeFile(alertsFile(), JSON.stringify(all), "utf8");
+    await auditLog(username, status === "ACKNOWLEDGED" ? "ALERT_ACKNOWLEDGED" : "ALERT_RESOLVED", id);
+  }
+  return found;
 }
 
 export async function queryEvents(f: EventFilter): Promise<StoredEvent[]> {
