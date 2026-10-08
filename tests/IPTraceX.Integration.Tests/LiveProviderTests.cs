@@ -42,4 +42,30 @@ public sealed class LiveProviderTests
         Assert.Equal(6, info.IpVersion);
         Assert.NotNull(info.Geolocation.CountryCode);
     }
+
+    [SkippableFact]
+    public async Task LiveInvestigationRoundtrip()
+    {
+        Skip.IfNot(LiveEnabled(), "Set IPTRACEX_LIVE=1 to run live provider tests.");
+        string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var profiler = new IntelligenceProfiler(Config());
+            IntelligenceProfile profile = await profiler.AnalyzeIpAsync("8.8.8.8");
+            var investigation = new Investigation(
+                InvestigationId.New(), DateTimeOffset.UtcNow, AppInfo.Version,
+                profile.Geo.Ip, "ip", profile, [], Investigation.CurrentSchema);
+            var store = new FileInvestigationStore(dir);
+            store.Save(investigation);
+            Investigation loaded = store.Get(investigation.Id);
+            Assert.Equal("US", loaded.Profile.Geo.Geolocation.CountryCode);
+            Assert.NotEmpty(Evidence.BuildMatrix(loaded.Profile));
+            Assert.Single(store.List());
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }
