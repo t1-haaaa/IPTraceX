@@ -3,6 +3,10 @@
 ## Deploy
 
 1. Render → New → Blueprint → select `render.yaml` in repo root.
+   (CLI alternative: install the official Render CLI —
+   `winget install render.cli`, Homebrew, or
+   `github.com/render-oss/cli` releases — then
+   `render login`, `render blueprints validate render.yaml`.)
 2. Enter secrets (all `sync: false`, never committed):
    `IPTRACEX_AUDIT_INGEST_SECRET`,
    `IPTRACEX_DASHBOARD_SESSION_SECRET`,
