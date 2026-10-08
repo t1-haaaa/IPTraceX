@@ -393,6 +393,36 @@ public sealed class AuditCliTests
     }
 
     [Fact]
+    public async Task InvestigatePathsEmitLookupTelemetry()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var config = Sample.TestConfig();
+            config.ProjectRoot = dir;
+            config.AuditEnabled = true;
+            var output = new StringWriter();
+            var app = Sample.App(new FakeEngine(), "", new Palette(false), config,
+                null, output, new StringWriter(),
+                audit: new AuditLogger(dir));
+            Assert.Equal(0, await app.RunAsync(["8.8.8.8", "--investigate"]));
+            Assert.Equal(0, await app.RunAsync(["--email", "user@gmail.com", "--investigate"]));
+            IReadOnlyList<AuditEvent> events = FileAuditSink.Read(dir, maxLines: 500);
+            Assert.Contains(events, e => e.EventType == AuditEventTypes.IpLookupStart);
+            Assert.Contains(events, e => e.EventType == AuditEventTypes.IpLookupComplete);
+            Assert.Contains(events, e => e.EventType == AuditEventTypes.EmailLookupStart);
+            Assert.Contains(events, e => e.EventType == AuditEventTypes.EmailLookupComplete);
+            Assert.Contains(events, e => e.EventType == AuditEventTypes.EmailBreachCheck);
+            Assert.Contains(events, e => e.EventType == AuditEventTypes.ConsensusComplete);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task LookupEmitsAuditTrail()
     {
         var (app, _, dir) = Make();
