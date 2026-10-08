@@ -252,18 +252,21 @@ t_windows_message() {
 }
 
 # --- 11. Real download → verify → cache → execute (Linux only, network). ---
+# Skipped automatically when the v2.3.0 release assets are unpublished.
 t_real_download_flow() {
   if is_windows_env; then
     echo "SKIP: real download (Windows cannot exec ELF)"
     return
   fi
-  local dir; dir="$(mktemp -d)"
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local expect="IPTraceX $APP_VERSION" dir; dir="$(mktemp -d)"
   cp "$LAUNCHER" "$dir/iptracex.sh"
   local out code
   set +e
   out="$("$dir/iptracex.sh" --version 2>&1)"; code=$?
   set -e
-  if [[ "$code" -eq 0 && "$out" == *"IPTraceX 2.1.0"* && -x "$dir/.iptracex/bin/IPTraceX" ]]; then
+  if [[ "$code" -eq 0 && "$out" == *"$expect"* && -x "$dir/.iptracex/bin/IPTraceX" ]]; then
     pass "download+verify+cache+exec"
   else
     fail "download flow (out='$out' code=$code)"
@@ -277,10 +280,121 @@ t_real_download_flow() {
   out="$("$dir/iptracex.sh" --version 2>&1)"; code=$?
   set -e
   after="$(stat -c %Y "$dir/.iptracex/bin/IPTraceX")"
-  if [[ "$code" -eq 0 && "$before" == "$after" && "$out" == *"IPTraceX 2.1.0"* ]]; then
+  if [[ "$code" -eq 0 && "$before" == "$after" && "$out" == *"$expect"* ]]; then
     pass "second run uses cache (no re-download)"
   else
     fail "cache reuse (out='$out' code=$code)"
+  fi
+  rm -rf "$dir"
+}
+
+# --- 12. Local binary resolution without download (sourced, offline). ---
+t_local_binary_resolved() {
+  if is_windows_env; then
+    echo "SKIP: local binary resolution (Windows FS ignores chmod +x here)"
+    return
+  fi  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  mkdir -p "$dir/.iptracex/bin"
+  echo "x" > "$dir/IPTraceX"; chmod +x "$dir/IPTraceX"
+  local saved_script="$SCRIPT_DIR" saved_cache="$CACHE_BIN" got
+  SCRIPT_DIR="$dir" CACHE_BIN="$dir/.iptracex/bin/IPTraceX"
+  got="$(resolve_binary || true)"
+  SCRIPT_DIR="$saved_script" CACHE_BIN="$saved_cache"
+  if [[ "$got" == "$dir/IPTraceX" ]]; then
+    pass "local binary found first (no download)"
+  else
+    fail "local binary resolution (got='$got')"
+  fi
+  rm -rf "$dir"
+}
+
+# --- 13. HTTP 404 fails fast with a clear message (stubbed curl). ---
+t_http_404_fast() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  mkdir -p "$dir/fakebin"
+  printf '#!/usr/bin/env bash\nprintf "404"\necho "curl: (22) The requested URL returned error: 404" >&2\nexit 22\n' \
+    > "$dir/fakebin/curl"
+  chmod +x "$dir/fakebin/curl"
+  local out code
+  set +e
+  out="$(PATH="$dir/fakebin:$PATH" download_file \
+    "https://github.com/t1-haaaa/IPTraceX/releases/latest/download/x" \
+    "$dir/out.bin" "curl" 2>&1)"; code=$?
+  set -e
+  if [[ "$code" -ne 0 && "$out" == *"HTTP 404"* && "$out" == *"may not be published"* ]]; then
+    pass "HTTP 404 fails fast with clear message"
+  else
+    fail "http 404 handling (out='$out' code=$code)"
+  fi
+  rm -rf "$dir"
+}
+
+# --- 14. Timeout fails fast with a clear message (stubbed curl). ---
+t_timeout_fast() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  mkdir -p "$dir/fakebin"
+  printf '#!/usr/bin/env bash\nprintf "000"\necho "curl: (28) Operation timed out" >&2\nexit 28\n' \
+    > "$dir/fakebin/curl"
+  chmod +x "$dir/fakebin/curl"
+  local out code
+  set +e
+  out="$(IPTRACEX_DOWNLOAD_TIMEOUT=7 PATH="$dir/fakebin:$PATH" download_file \
+    "https://github.com/t1-haaaa/IPTraceX/releases/latest/download/x" \
+    "$dir/out.bin" "curl" 2>&1)"; code=$?
+  set -e
+  if [[ "$code" -ne 0 && "$out" == *"timed out"* ]]; then
+    pass "timeout fails fast with clear message"
+  else
+    fail "timeout handling (out='$out' code=$code)"
+  fi
+  rm -rf "$dir"
+}
+
+# --- 15. Network failure fails fast (stubbed curl, exit 7). ---
+t_network_failure_fast() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  mkdir -p "$dir/fakebin"
+  printf '#!/usr/bin/env bash\nprintf "000"\necho "curl: (7) Failed to connect" >&2\nexit 7\n' \
+    > "$dir/fakebin/curl"
+  chmod +x "$dir/fakebin/curl"
+  local out code
+  set +e
+  out="$(PATH="$dir/fakebin:$PATH" download_file \
+    "https://github.com/t1-haaaa/IPTraceX/releases/latest/download/x" \
+    "$dir/out.bin" "curl" 2>&1)"; code=$?
+  set -e
+  if [[ "$code" -ne 0 && "$out" == *"Network failure"* ]]; then
+    pass "network failure fails fast with clear message"
+  else
+    fail "network failure handling (out='$out' code=$code)"
+  fi
+  rm -rf "$dir"
+}
+
+# --- 16. Checksum mismatch message is explicit. ---
+t_checksum_mismatch_message() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  echo "hello" > "$dir/a.txt"
+  ( cd "$dir" && sha256sum a.txt > SHA256SUMS )
+  echo "tampered" > "$dir/a.txt"
+  local out code
+  set +e
+  out="$(verify_archive "$dir/a.txt" "$dir/SHA256SUMS" "$dir" 2>&1)"; code=$?
+  set -e
+  if [[ "$code" -ne 0 && "$out" == *"mismatch"* ]]; then
+    pass "checksum mismatch is explicit"
+  else
+    fail "checksum mismatch message (out='$out' code=$code)"
   fi
   rm -rf "$dir"
 }
@@ -296,6 +410,11 @@ t_clear_behavior
 t_arch_gate
 t_windows_message
 t_real_download_flow
+t_local_binary_resolved
+t_http_404_fast
+t_timeout_fast
+t_network_failure_fast
+t_checksum_mismatch_message
 
 echo ""
 echo "Launcher tests: PASS=$PASS FAIL=$FAIL"

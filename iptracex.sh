@@ -131,8 +131,13 @@ detect_downloader() {
   fi
 }
 
+# Hard bounds for every download (never hang indefinitely).
+# Overridable per-call for tests/scripting:
+# IPTRACEX_CONNECT_TIMEOUT (default 15), IPTRACEX_DOWNLOAD_TIMEOUT (default 180).
+
 download_file() {
   # download_file <url> <dest> <tool> — quiet progress, visible errors.
+  # Fails fast on HTTP 404/403; maps curl/wget failures to clear messages.
   local url="$1" dest="$2" downloader="$3"
   case "$url" in
     https://github.com/t1-haaaa/IPTraceX/*) ;;
@@ -142,9 +147,62 @@ download_file() {
       ;;
   esac
   if [[ "$downloader" == "curl" ]]; then
-    curl -fSL -sS --connect-timeout 15 --max-time 600 --retry 2 -o "$dest" "$url"
+    local err_file http_code curl_status connect_timeout max_time
+    connect_timeout="${IPTRACEX_CONNECT_TIMEOUT:-15}"
+    max_time="${IPTRACEX_DOWNLOAD_TIMEOUT:-180}"
+    err_file="$(mktemp)" || {
+      log_err "[ERROR] Cannot create temporary file."
+      return 1
+    }
+    http_code="$(curl -fSL -sS --connect-timeout "$connect_timeout" --max-time "$max_time" --retry 2 \
+      -o "$dest" -w '%{http_code}' "$url" 2>"$err_file")"
+    curl_status=$?
+    cat "$err_file" >&2
+    rm -f "$err_file"
+    if [[ "$curl_status" -eq 0 ]]; then
+      return 0
+    fi
+    if [[ "$curl_status" -eq 28 ]]; then
+      log_err "[ERROR] Download timed out after ${max_time}s: $(basename "$dest")."
+      log_err "[!] Check connectivity and retry, or use a cached/local binary."
+      return 1
+    fi
+    case "$http_code" in
+      404)
+        log_err "[ERROR] Release asset not found (HTTP 404): $(basename "$dest")."
+        log_err "[!] The GitHub Release may not be published yet — check for v$APP_VERSION."
+        ;;
+      403)
+        log_err "[ERROR] Download forbidden (HTTP 403): $(basename "$dest")."
+        log_err "[!] Possible API rate limiting — wait and retry, or use a cached/local binary."
+        ;;
+      000)
+        log_err "[ERROR] Network failure downloading $(basename "$dest")."
+        log_err "[!] Check connectivity (connect timeout ${connect_timeout}s) and retry."
+        ;;
+      *)
+        log_err "[ERROR] Download failed (HTTP ${http_code:-unknown}): $(basename "$dest")."
+        ;;
+    esac
+    return 1
   elif [[ "$downloader" == "wget" ]]; then
-    wget -q --timeout=15 --tries=3 -O "$dest" "$url"
+    local connect_timeout
+    connect_timeout="${IPTRACEX_CONNECT_TIMEOUT:-15}"
+    wget -q --timeout="$connect_timeout" --tries=3 -O "$dest" "$url" 2>&1 || {
+      local st
+      st=$?
+      if [[ "$st" -eq 8 ]]; then
+        log_err "[ERROR] Release asset not found (HTTP 404): $(basename "$dest")."
+        log_err "[!] The GitHub Release may not be published yet — check for v$APP_VERSION."
+      elif [[ "$st" -eq 4 ]]; then
+        log_err "[ERROR] Network failure downloading $(basename "$dest")."
+        log_err "[!] Check connectivity and retry, or use a cached/local binary."
+      else
+        log_err "[ERROR] Download failed (wget exit $st): $(basename "$dest")."
+      fi
+      return 1
+    }
+    return 0
   else
     log_err "[ERROR] Unable to download IPTraceX."
     log_err "[!] Neither curl nor wget is installed."
@@ -318,7 +376,7 @@ main() {
   if [[ -z "$binary" ]]; then
     log_err "[ERROR] IPTraceX binary is unavailable."
     log_err "[!] Platform: Linux $(uname -m 2>/dev/null || echo unknown)"
-    log_err "[!] Attempted official release download."
+    log_err "[!] Attempting official release download."
     if ! install_binary; then
       exit 1
     fi
