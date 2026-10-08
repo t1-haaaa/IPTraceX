@@ -157,8 +157,11 @@ public static class Evidence
         };
 
     /// <summary>Tracked fields for email timelines and comparisons.</summary>
-    public static IReadOnlyDictionary<string, string?> EmailSnapshot(EmailProfile profile) =>
-        new Dictionary<string, string?>(StringComparer.Ordinal)
+    public static IReadOnlyDictionary<string, string?> EmailSnapshot(EmailProfile profile)
+    {
+        EmailSecurityExposure security = profile.Security
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+        return new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["Domain"] = profile.Domain,
             ["MailProvider"] = profile.DomainIntel.MailProvider,
@@ -172,9 +175,12 @@ public static class Evidence
                 System.Globalization.CultureInfo.InvariantCulture),
             ["Breaches"] = profile.Breaches.Count.ToString(
                 System.Globalization.CultureInfo.InvariantCulture),
+            ["PasswordExposure"] = security.PasswordExposure,
+            ["Severity"] = security.Severity,
             ["Risk"] = profile.Risk.Score?.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["Confidence"] = profile.FieldConfidences.FirstOrDefault(f => f.Field == "domain")?.Confidence,
         };
+    }
 
     /// <summary>Consecutive changes across a time-ordered history.</summary>
     public static List<string> TimelineChanges(IReadOnlyList<Investigation> history)
@@ -319,9 +325,48 @@ public static class Evidence
         string footprint = email?["public_footprint"] is System.Text.Json.Nodes.JsonArray fp
             ? fp.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
         string breaches = "";
+        var storedCategories = new List<IReadOnlyList<string>>();
         if (email?["breach_intelligence"] is System.Text.Json.Nodes.JsonArray arr)
         {
             breaches = arr.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            foreach (var node in arr)
+            {
+                if (node is System.Text.Json.Nodes.JsonObject breach)
+                {
+                    var classes = new List<string>();
+                    System.Text.Json.Nodes.JsonArray? list =
+                        breach["data_classes"] as System.Text.Json.Nodes.JsonArray
+                        ?? breach["categories"] as System.Text.Json.Nodes.JsonArray;
+                    if (list is not null)
+                    {
+                        foreach (var c in list)
+                        {
+                            if (c?.GetValue<string?>() is string text && text.Length != 0)
+                            {
+                                classes.Add(text);
+                            }
+                        }
+                    }
+
+                    storedCategories.Add(classes);
+                }
+            }
+        }
+
+        // Prefer the stored security section; derive from categories for older payloads.
+        string passwordExposure = "";
+        string severity = "";
+        if (email?["security_exposure"] is System.Text.Json.Nodes.JsonObject sec)
+        {
+            passwordExposure = Str(sec["password_exposure"]);
+            severity = Str(sec["severity"]);
+        }
+
+        if (passwordExposure == "" && storedCategories.Count != 0)
+        {
+            EmailSecurityExposure derived = BreachSecurity.AnalyzeCategories(storedCategories, true);
+            passwordExposure = derived.PasswordExposure;
+            severity = derived.Severity;
         }
 
         string risk = "";
@@ -350,6 +395,8 @@ public static class Evidence
             ["Avatar"] = avatar,
             ["Footprint"] = footprint,
             ["Breaches"] = breaches,
+            ["PasswordExposure"] = passwordExposure,
+            ["Severity"] = severity,
             ["Risk"] = risk,
             ["Confidence"] = confidence,
         };

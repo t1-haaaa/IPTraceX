@@ -72,4 +72,5 @@ public sealed record EmailProfile(
     RiskAssessment Risk,
     IReadOnlyList<FieldConfidence> FieldConfidences,
     IReadOnlyList<ProviderOutcome> Providers,
-    InvestigationMetadata Metadata);
+    InvestigationMetadata Metadata,
+    EmailSecurityExposure? Security = null);

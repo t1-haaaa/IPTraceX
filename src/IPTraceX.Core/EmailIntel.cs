@@ -12,6 +12,10 @@ public static class EmailIntel
             ["disposable"] = 20,
             ["breach"] = 10,
             ["suspicious"] = 15,
+            ["password"] = 30,
+            ["authtoken"] = 35,
+            ["hints"] = 20,
+            ["recovery"] = 20,
         };
 
     public static Dictionary<string, int> ParseEmailWeights(string? raw)
@@ -78,6 +82,21 @@ public static class EmailIntel
         int breachCount,
         bool suspiciousDomain,
         IReadOnlyDictionary<string, int>? weights = null)
+        => EvaluateRisk(disposable, breachCount, suspiciousDomain, null, weights);
+
+    /// <summary>
+    /// Evidence-driven email risk. No double counting: a password/token
+    /// breach contributes its major weight INSTEAD of the generic breach
+    /// weight; email/usernames inside that breach are supporting evidence.
+    /// Hint/recovery contributions apply only when passwords are absent
+    /// (covered by the password contribution otherwise).
+    /// </summary>
+    public static RiskAssessment EvaluateRisk(
+        bool? disposable,
+        int breachCount,
+        bool suspiciousDomain,
+        EmailSecurityExposure? security,
+        IReadOnlyDictionary<string, int>? weights = null)
     {
         weights ??= DefaultEmailWeights();
         var evidence = new List<RiskEvidence>();
@@ -92,7 +111,29 @@ public static class EmailIntel
                 "Temporary addresses correlate with abuse and throwaway use."));
         }
 
-        if (breachCount > 0)
+        bool token = security?.AuthData == ExposureStatus.Reported;
+        bool password = security?.PasswordExposure == ExposureStatus.Reported;
+        bool hints = !password
+            && (security?.PasswordHints == ExposureStatus.Reported
+                || security?.RecoveryExposure == ExposureStatus.Reported);
+        if (token)
+        {
+            evidence.Add(new RiskEvidence(
+                "Authentication data exposure", "CRITICAL", "hibp",
+                "A breach reports auth tokens or session material for this address.",
+                Weight("authtoken", 35),
+                "Token theft enables session hijack without the password."));
+        }
+
+        if (password)
+        {
+            evidence.Add(new RiskEvidence(
+                "Password exposure", "HIGH", "hibp",
+                "A breach reports password data for this address (existence only; value never retrieved).",
+                Weight("password", 30),
+                "Exposed passwords enable credential-stuffing and takeover where reused."));
+        }
+        else if (breachCount > 0 && !token)
         {
             int extra = Math.Min(5, (breachCount - 1) * 5);
             evidence.Add(new RiskEvidence(
@@ -100,6 +141,15 @@ public static class EmailIntel
                 $"{breachCount} breache(s) expose this address (metadata only).",
                 Weight("breach", 10) + extra,
                 "Presence in breach corpora raises takeover/phishing exposure."));
+        }
+
+        if (hints && !password)
+        {
+            evidence.Add(new RiskEvidence(
+                "Password hint exposure", "MEDIUM", "hibp",
+                "A breach reports password hints or recovery data for this address.",
+                Weight("hints", 20),
+                "Hints and recovery answers help attackers guess credentials."));
         }
 
         if (suspiciousDomain)

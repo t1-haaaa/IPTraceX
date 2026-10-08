@@ -15,6 +15,16 @@ Format follows Keep a Changelog; versions follow SemVer.
   Keys (`IPTRACEX_HIBP_API_KEY`, `IPTRACEX_GITHUB_TOKEN`) are env-only and
   never stored; see `docs/email-intelligence.md`, `docs/email-providers.md`,
   `docs/email-risk.md`, `docs/email-privacy.md`.
+- feat: email breach exposure alerts — normalized password/hint/token/
+  recovery signals (`REPORTED`/`NOT_REPORTED`/`UNKNOWN`), breach severity
+  (`CRITICAL`/`HIGH`/`MEDIUM`/`LOW`), `[!] PASSWORD DATA EXPOSED` and
+  `[CRITICAL] AUTHENTICATION DATA EXPOSED` warnings, evidence-driven
+  security recommendations, `EMAIL SECURITY STATUS` block, `security_exposure`
+  JSON section, per-breach `data_classes` + `password_exposure`, report
+  `SECURITY EXPOSURE` sections, password-exposure timeline/comparison
+  fields, extended email risk (password +30 / authtoken +35 / hints +20,
+  no double counting). Secret values never retrieved, displayed, logged,
+  or stored.
 
 ## 2.1.0 — 2026-10-08
 

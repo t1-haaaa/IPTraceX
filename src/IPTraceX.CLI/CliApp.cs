@@ -863,11 +863,12 @@ public sealed class CliApp
             _output.WriteLine("");
             _output.WriteLine($"{_palette.TokenInfo()} Email actions");
             _output.WriteLine("");
-            _output.WriteLine("[1] View evidence");
-            _output.WriteLine("[2] View providers");
-            _output.WriteLine("[3] View domain intelligence");
-            _output.WriteLine("[4] Generate report");
-            _output.WriteLine("[5] Save investigation");
+            _output.WriteLine("[1] View breaches");
+            _output.WriteLine("[2] View evidence");
+            _output.WriteLine("[3] View providers");
+            _output.WriteLine("[4] Security recommendations");
+            _output.WriteLine("[5] Generate report");
+            _output.WriteLine("[6] Save investigation");
             _output.WriteLine("[0] Back");
             _output.WriteLine("");
             _output.WriteLine($"{_palette.TokenAsk()} Select an option:");
@@ -893,11 +894,17 @@ public sealed class CliApp
 
             if (choice is "1" or "01")
             {
-                _output.WriteLine(Formatting.FormatEmailEvidence(profile, _palette));
+                _output.WriteLine(Formatting.FormatEmailBreaches(profile, _palette));
                 continue;
             }
 
             if (choice is "2" or "02")
+            {
+                _output.WriteLine(Formatting.FormatEmailEvidence(profile, _palette));
+                continue;
+            }
+
+            if (choice is "3" or "03")
             {
                 foreach (ProviderOutcome outcome in profile.Providers)
                 {
@@ -905,16 +912,17 @@ public sealed class CliApp
                         + (outcome.Error is null ? "" : $" ({outcome.Error})"));
                 }
 
-                continue;
-            }
-
-            if (choice is "3" or "03")
-            {
                 _output.WriteLine(Formatting.FormatEmailDomain(profile, _palette));
                 continue;
             }
 
             if (choice is "4" or "04")
+            {
+                _output.WriteLine(Formatting.FormatEmailRecommendations(profile, _palette));
+                continue;
+            }
+
+            if (choice is "5" or "05")
             {
                 string? format = await PromptAsync(
                     $"{_palette.TokenAsk()} Format (txt/json/html):\n{_palette.TokenIn()} ", ct)
@@ -929,7 +937,7 @@ public sealed class CliApp
                 continue;
             }
 
-            if (choice is "5" or "05")
+            if (choice is "6" or "06")
             {
                 SaveEmailInvestigation(profile);
                 continue;
@@ -940,7 +948,7 @@ public sealed class CliApp
                 return;
             }
 
-            _output.WriteLine("[?] Unknown option. Choose 1-5 or 0.");
+            _output.WriteLine("[?] Unknown option. Choose 1-6 or 0.");
         }
     }
 

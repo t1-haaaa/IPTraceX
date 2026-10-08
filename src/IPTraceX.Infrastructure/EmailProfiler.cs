@@ -85,10 +85,12 @@ public sealed class EmailProfiler
         bool hasMx = (domain?.MxHosts.Length ?? 0) != 0;
         EmailReputation reputation = EmailIntel.BuildReputation(
             domain?.Disposable, breaches, isNew, hasMx);
+        EmailSecurityExposure security = BreachSecurity.Analyze(breaches, breach is not null);
 
         RiskAssessment risk = EmailIntel.EvaluateRisk(
             domain?.Disposable, breaches.Length,
             reputation.SuspiciousDomain == "DETECTED",
+            security,
             EmailIntel.ParseEmailWeights(_config.EmailRiskWeights));
 
         var confidences = new List<FieldConfidence>
@@ -119,6 +121,14 @@ public sealed class EmailProfiler
                     : breaches.Length == 0
                         ? "Breach corpus queried; address absent."
                         : "Breach metadata returned by the corpus."),
+            Field("password-exposure",
+                security.PasswordExposure == ExposureStatus.Unknown ? null : security.PasswordExposure,
+                breach is null ? 0 : 1, 1,
+                breach is null
+                    ? "No breach-intelligence source configured."
+                    : security.PasswordExposure == ExposureStatus.Reported
+                        ? "A known breach reports password data (existence only; value never retrieved)."
+                        : "Checked breach data reports no password classes; absence of a report is not safety."),
         };
 
         var outcomes = evidence.Select(e => new ProviderOutcome(
@@ -133,7 +143,7 @@ public sealed class EmailProfiler
         return new EmailProfile(
             target.Raw.Trim(), target.Normalized, target.Domain,
             domainIntel, avatarIntel, footprintMatches, breaches,
-            reputation, risk, confidences, outcomes, metadata);
+            reputation, risk, confidences, outcomes, metadata, security);
     }
 
     private static FieldConfidence Field(

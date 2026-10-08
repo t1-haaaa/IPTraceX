@@ -369,6 +369,8 @@ public static class Formatting
     /// <summary>Human-readable email profile from live analysis.</summary>
     public static string FormatEmailProfile(EmailProfile profile, Palette p)
     {
+        EmailSecurityExposure security = profile.Security
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
         var lines = new List<string>
         {
             "",
@@ -377,7 +379,25 @@ public static class Formatting
             $"    Target       : {p.Data(profile.Target)}",
             $"    Domain       : {p.Data(profile.Domain)}",
             "",
-            $"{p.TokenOk()} {p.Brand("DOMAIN INTELLIGENCE")}",
+            $"{p.TokenOk()} {p.Brand("EMAIL SECURITY STATUS")}",
+            "",
+            $"    Target       : {p.Data(profile.Target)}",
+            "",
+            $"    Breach Exposure      : {p.Data(security.BreachExposure)}",
+            $"    Password Data        : {p.Data(security.PasswordExposure)}",
+            $"    Password Hints       : {p.Data(security.PasswordHints)}",
+            $"    Authentication Tokens: {p.Data(security.AuthData)}",
+            $"    Disposable           : {p.Data(profile.DomainIntel.DisposableStatus)}",
+            $"    Known Breaches       : {p.Data(security.BreachCount.ToString(System.Globalization.CultureInfo.InvariantCulture))}",
+            $"    Severity             : {p.Data(security.Severity)}",
+            $"    Risk                 : {p.Data(profile.Risk.Score.HasValue ? $"{profile.Risk.Score}/100" : "unknown")} - {p.Data(profile.Risk.Level)}",
+            $"    Action Required      : {p.Data(security.ActionRequired ? "YES" : "NO")}",
+            "",
+        };
+        lines.AddRange(FormatSecurityAlert(security, profile.Breaches, p));
+        lines.Add($"{p.TokenOk()} {p.Brand("DOMAIN INTELLIGENCE")}");
+        lines.AddRange(new[]
+        {
             $"    MX           : {p.Data(profile.DomainIntel.MxHosts.Length == 0 ? "none" : string.Join(", ", profile.DomainIntel.MxHosts))}",
             $"    Mail Provider: {p.Data(profile.DomainIntel.MailProvider ?? "Unknown")}",
             $"    SPF          : {p.Data(profile.DomainIntel.SpfRecord is null ? "NOT FOUND" : "FOUND")}",
@@ -388,7 +408,7 @@ public static class Formatting
             "",
             $"{p.TokenOk()} {p.Brand("PUBLIC AVATAR")}",
             $"    Status       : {p.Data(profile.Avatar.Status)}",
-        };
+        });
         if (profile.Avatar.Url is not null)
         {
             lines.Add($"    URL          : {p.Data(profile.Avatar.Url)}");
@@ -454,6 +474,167 @@ public static class Formatting
         lines.Add(p.TokenWarn() + " NOTE");
         lines.Add("    Email intelligence is approximate and limited to public sources.");
         lines.Add("    Weak correlations are labeled as such, never as identity.");
+        lines.Add("    IPTraceX checks breach metadata only: it never retrieves or shows passwords.");
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// Defensive breach alert. Reports the EXISTENCE and TYPE of exposed
+    /// data classes — never secret values (which never enter the system).
+    /// </summary>
+    public static List<string> FormatSecurityAlert(
+        EmailSecurityExposure security, IReadOnlyList<BreachInfo> breaches, Palette p)
+    {
+        var lines = new List<string>();
+        if (security.AuthData == ExposureStatus.Reported)
+        {
+            lines.Add($"{p.TokenError()} {p.Brand("SECURITY ALERT")}");
+            lines.Add("");
+            lines.Add("    [CRITICAL] AUTHENTICATION DATA EXPOSED");
+            lines.Add("");
+            lines.Add("    One or more known breaches associated with this email");
+            lines.Add("    reported auth tokens or session material.");
+        }
+        else if (security.PasswordExposure == ExposureStatus.Reported)
+        {
+            lines.Add($"{p.TokenError()} {p.Brand("SECURITY ALERT")}");
+            lines.Add("");
+            lines.Add("    [!] PASSWORD DATA EXPOSED");
+            lines.Add("");
+            lines.Add("    This email address appeared in one or more known breaches");
+            lines.Add("    where password-related information was reported.");
+        }
+        else if (security.PasswordHints == ExposureStatus.Reported)
+        {
+            lines.Add($"{p.TokenWarn()} {p.Brand("SECURITY ALERT")}");
+            lines.Add("");
+            lines.Add("    [!] PASSWORD HINT DATA EXPOSED");
+            lines.Add("");
+            lines.Add("    Password hints help attackers guess credentials.");
+            lines.Add("    Change the password and security information.");
+        }
+
+        if (lines.Count == 0)
+        {
+            return lines;
+        }
+
+        foreach (BreachInfo breach in breaches)
+        {
+            var normalized = BreachSecurity.NormalizedCategories(breach.Categories);
+            bool sensitive = normalized.Contains(SecurityCategory.Passwords)
+                || normalized.Contains(SecurityCategory.AuthTokens)
+                || normalized.Contains(SecurityCategory.SessionData)
+                || normalized.Contains(SecurityCategory.PasswordHints);
+            if (!sensitive)
+            {
+                continue;
+            }
+
+            lines.Add("");
+            lines.Add($"    Breach       : {p.Data(breach.Name)}");
+            if (breach.Date is not null)
+            {
+                lines.Add($"    Date         : {p.Data(breach.Date)}");
+            }
+
+            lines.Add("    Exposed Classes:");
+            foreach (string raw in breach.Categories)
+            {
+                lines.Add($"    - {p.Data(raw.Trim())}");
+            }
+        }
+
+        lines.Add("");
+        lines.Add("    Password     : NOT SHOWN");
+        lines.Add("    IMPORTANT:");
+        lines.Add("    IPTraceX does NOT retrieve or display the actual password.");
+        lines.Add("    Source: Have I Been Pwned (metadata only).");
+        lines.Add("");
+        lines.Add("    Recommended Action:");
+        lines.Add(security.AuthData == ExposureStatus.Reported
+            ? "    REVOKE SESSIONS AND TOKENS"
+            : "    CHANGE PASSWORD");
+        lines.Add("");
+        return lines;
+    }
+
+    /// <summary>Per-breach listing (names, dates, data-class names only).</summary>
+    public static string FormatEmailBreaches(EmailProfile profile, Palette p)
+    {
+        EmailSecurityExposure security = profile.Security
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("KNOWN BREACHES")}",
+            "",
+            $"    Breaches                : {p.Data(security.BreachCount.ToString(System.Globalization.CultureInfo.InvariantCulture))}",
+            $"    Password-related        : {p.Data(security.PasswordBreachCount.ToString(System.Globalization.CultureInfo.InvariantCulture))}",
+            $"    Password-hint           : {p.Data(security.HintBreachCount.ToString(System.Globalization.CultureInfo.InvariantCulture))}",
+            $"    Token-related           : {p.Data(security.TokenBreachCount.ToString(System.Globalization.CultureInfo.InvariantCulture))}",
+            $"    Other data exposure     : {p.Data(security.OtherBreachCount.ToString(System.Globalization.CultureInfo.InvariantCulture))}",
+            $"    Severity                : {p.Data(security.Severity)}",
+            "",
+        };
+        if (profile.Breaches.Count == 0)
+        {
+            lines.Add(security.BreachExposure == ExposureStatus.Unknown
+                ? "    No breach source configured: exposure UNKNOWN."
+                : "    No known password-related exposure was returned by the configured breach source.");
+            lines.Add("");
+            return string.Join("\n", lines);
+        }
+
+        int index = 0;
+        foreach (BreachInfo breach in profile.Breaches)
+        {
+            index++;
+            bool password = BreachSecurity.NormalizedCategories(breach.Categories)
+                .Contains(SecurityCategory.Passwords);
+            lines.Add($"    Breach #{index}");
+            lines.Add($"    Title          : {p.Data(breach.Name)}");
+            lines.Add($"    Date           : {p.Data(breach.Date ?? "Unknown")}");
+            lines.Add($"    Password Data  : {p.Data(password ? "YES" : "NO")}");
+            foreach (string raw in breach.Categories)
+            {
+                lines.Add($"    - {p.Data(raw.Trim())}");
+            }
+
+            lines.Add("");
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>Evidence-generated defensive recommendations.</summary>
+    public static string FormatEmailRecommendations(EmailProfile profile, Palette p)
+    {
+        EmailSecurityExposure security = profile.Security
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("SECURITY RECOMMENDATIONS")}",
+            "",
+        };
+        if (security.Recommendations.Length == 0)
+        {
+            lines.Add("    No evidence-driven actions. Stay alert for phishing.");
+            lines.Add("");
+            return string.Join("\n", lines);
+        }
+
+        lines.Add("    RECOMMENDED ACTIONS");
+        lines.Add("");
+        int index = 0;
+        foreach (string recommendation in security.Recommendations)
+        {
+            index++;
+            lines.Add($"    [{index}] {recommendation}");
+        }
+
         lines.Add("");
         return string.Join("\n", lines);
     }
@@ -605,6 +786,20 @@ public static class Formatting
 
     public static string FormatEmailEvidence(EmailProfile profile, Palette p)
     {
+        EmailSecurityExposure security = profile.Security
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+        string EvidenceFor(string status) => status switch
+        {
+            ExposureStatus.Reported => "DataClasses contains the sensitive class",
+            ExposureStatus.NotReported => "Checked data reports no such class",
+            _ => "No breach source configured",
+        };
+        string StatusFor(string status) => status switch
+        {
+            ExposureStatus.Reported => "SUPPORT",
+            ExposureStatus.NotReported => "MISSING",
+            _ => "MISSING",
+        };
         var lines = new List<string>
         {
             "",
@@ -617,6 +812,12 @@ public static class Formatting
             $"    {"disposable",-12} {Truncate(profile.DomainIntel.DisposableStatus, 25).PadRight(25)} {(profile.DomainIntel.DisposableStatus == "UNKNOWN" ? "MISSING" : "SUPPORT")}",
             $"    {"avatar",-12} {Truncate(profile.Avatar.Status, 25).PadRight(25)} {(profile.Avatar.Status == "UNKNOWN" ? "MISSING" : "SUPPORT")}",
             $"    {"breaches",-12} {Truncate(profile.Breaches.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), 25).PadRight(25)} SUPPORT",
+            $"    {"password-exp",-12} {Truncate(security.PasswordExposure, 25).PadRight(25)} {StatusFor(security.PasswordExposure)}",
+            $"    {"auth-data",-12} {Truncate(security.AuthData, 25).PadRight(25)} {StatusFor(security.AuthData)}",
+            "",
+            $"    password-exposure: {EvidenceFor(security.PasswordExposure)} (HIBP)",
+            $"    auth-data: {EvidenceFor(security.AuthData)} (HIBP)",
+            $"    Confidence: {(security.BreachExposure == ExposureStatus.Reported ? "HIGH" : "UNKNOWN")}",
             "",
         };
         return string.Join("\n", lines);

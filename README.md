@@ -311,10 +311,13 @@ discovered IP plus an infrastructure summary.
 
 Public-OSINT only: domain/MX/SPF/DMARC/DNSSEC, disposable and
 free-mail classification, public avatar, public footprint, optional
-HIBP breach metadata (`IPTRACEX_HIBP_API_KEY`), email risk and
-explained confidence — saved under `EMX-YYYYMMDD-XXXXXX` IDs with
-comparison and timeline support. No logins, no private data, no
-identity claims from weak signals.
+HIBP breach metadata (`IPTRACEX_HIBP_API_KEY`) with password/hint/token
+exposure alerts, severity, and evidence-driven recommendations, email
+risk and explained confidence — saved under `EMX-YYYYMMDD-XXXXXX` IDs
+with comparison and timeline support. Reports the EXISTENCE and TYPE
+of exposed data classes only: IPTraceX never retrieves or shows
+passwords, hashes, tokens, or mailbox contents. No logins, no private
+data, no identity claims from weak signals.
 See `docs/email-intelligence.md`, `docs/email-providers.md`,
 `docs/email-risk.md`, `docs/email-privacy.md`.
 
@@ -361,7 +364,7 @@ with `email_domain`, `avatar`, `public_footprint`,
 | `IPTRACEX_ABUSEIPDB_KEY` | empty | Optional AbuseIPDB key (enables reputation) |
 | `IPTRACEX_HIBP_API_KEY` | empty | Optional HIBP key (enables breach metadata) |
 | `IPTRACEX_GITHUB_TOKEN` | empty | Optional GitHub token (commit-authorship footprint) |
-| `IPTRACEX_EMAIL_RISK_WEIGHTS` | defaults | e.g. `disposable=20,breach=10,suspicious=15` |
+| `IPTRACEX_EMAIL_RISK_WEIGHTS` | defaults | e.g. `disposable=20,breach=10,suspicious=15,password=30,authtoken=35,hints=20,recovery=20` |
 | `IPTRACEX_TIMEOUT` | `10` | Per-provider seconds (1–60) |
 | `IPTRACEX_GLOBAL_TIMEOUT` | `90` | Whole-investigation seconds (10–600) |
 | `IPTRACEX_MAX_CONCURRENCY` | `4` | Intel providers in flight (1–16) |

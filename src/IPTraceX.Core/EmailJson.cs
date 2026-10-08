@@ -27,7 +27,18 @@ public static class EmailJson
         [property: JsonPropertyName("domain")] string? Domain,
         [property: JsonPropertyName("date")] string? Date,
         [property: JsonPropertyName("categories")] string[] Categories,
+        [property: JsonPropertyName("data_classes")] string[] DataClasses,
+        [property: JsonPropertyName("password_exposure")] bool PasswordExposure,
         [property: JsonPropertyName("source")] string Source);
+
+    private sealed record SecurityExposureDto(
+        [property: JsonPropertyName("breach_exposure")] string BreachExposure,
+        [property: JsonPropertyName("password_exposure")] string PasswordExposure,
+        [property: JsonPropertyName("password_hints")] string PasswordHints,
+        [property: JsonPropertyName("authentication_data")] string AuthData,
+        [property: JsonPropertyName("breach_count")] int BreachCount,
+        [property: JsonPropertyName("severity")] string Severity,
+        [property: JsonPropertyName("action_required")] bool ActionRequired);
 
     private sealed record ReputationDto(
         [property: JsonPropertyName("disposable")] string Disposable,
@@ -95,12 +106,20 @@ public static class EmailJson
         var breaches = new JsonArray();
         foreach (BreachInfo breach in profile.Breaches)
         {
+            bool passwordExposed = BreachSecurity.NormalizedCategories(breach.Categories)
+                .Contains(SecurityCategory.Passwords);
             breaches.Add(JsonSerializer.SerializeToNode(new BreachDto(
                 breach.Name, breach.Domain, breach.Date,
-                breach.Categories, breach.Source), Relaxed));
+                breach.Categories, breach.Categories, passwordExposed, breach.Source), Relaxed));
         }
 
         doc["breach_intelligence"] = breaches;
+        EmailSecurityExposure security = profile.Security
+            ?? BreachSecurity.Analyze(profile.Breaches, HibpAvailable(profile));
+        doc["security_exposure"] = JsonSerializer.SerializeToNode(new SecurityExposureDto(
+            security.BreachExposure, security.PasswordExposure, security.PasswordHints,
+            security.AuthData, security.BreachCount, security.Severity,
+            security.ActionRequired), Relaxed);
         doc["reputation"] = JsonSerializer.SerializeToNode(new ReputationDto(
             profile.Reputation.Disposable,
             profile.Reputation.BreachCount,
@@ -169,4 +188,8 @@ public static class EmailJson
 
     public static string ToJsonString(EmailProfile profile, bool indented = false, string? investigationId = null)
         => FromEmailProfile(profile, investigationId).ToJsonString(indented ? RelaxedIndented : Relaxed);
+
+    public static bool HibpAvailable(EmailProfile profile)
+        => profile.Providers.Any(o =>
+            o.ProviderId == "hibp" && o.Status == "success");
 }

@@ -91,6 +91,33 @@ public static class ReportService
                 .Append(" [").Append(Clean(e.Severity)).Append("] (").Append(Clean(e.Source)).AppendLine(")");
         }
 
+        EmailSecurityExposure security = profile.Security
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+        sb.AppendLine();
+        sb.AppendLine("SECURITY EXPOSURE");
+        sb.Append("Known Breaches: ").AppendLine(security.BreachCount.ToString());
+        sb.Append("Password Exposure: ").AppendLine(security.PasswordExposure);
+        sb.Append("Password Hint Exposure: ").AppendLine(security.PasswordHints);
+        sb.Append("Authentication Data Exposure: ").AppendLine(security.AuthData);
+        sb.Append("Breach Severity: ").AppendLine(security.Severity);
+        sb.Append("Risk: ").Append(profile.Risk.Score?.ToString() ?? "unknown")
+            .Append(" - ").AppendLine(Clean(profile.Risk.Level));
+        sb.AppendLine("Recommended Actions:");
+        if (security.Recommendations.Length == 0)
+        {
+            sb.AppendLine("  (none evidenced; stay alert for phishing)");
+        }
+
+        int action = 0;
+        foreach (string recommendation in security.Recommendations)
+        {
+            action++;
+            sb.Append("  ").Append(action).Append(". ").AppendLine(Clean(recommendation));
+        }
+
+        sb.AppendLine("Source: Have I Been Pwned (metadata only; values never retrieved)");
+        sb.AppendLine();
+
         foreach (FieldConfidence field in profile.FieldConfidences)
         {
             sb.Append("  ").Append(Clean(field.Field)).Append(": ").Append(Clean(field.Value))
@@ -105,6 +132,8 @@ public static class ReportService
     private static string ToEmailProfileHtml(EmailProfile profile)
     {
         static string E(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "Unknown");
+        EmailSecurityExposure security = profile.Security
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
         var sb = new System.Text.StringBuilder();
         sb.Append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
             + "<title>IPTraceX Email Investigation Report</title>\n<style>\n"
@@ -117,7 +146,25 @@ public static class ReportService
             + $"<p>Target: {E(profile.Target)}</p>\n<h2>Risk</h2>\n<table>\n"
             + $"<tr><th>Score</th><td>{E(profile.Risk.Score?.ToString() ?? "unknown")}</td></tr>\n"
             + $"<tr><th>Level</th><td>{E(profile.Risk.Level)}</td></tr>\n"
-            + "</table>\n<p>Email intelligence is approximate and limited to public sources.</p>\n"
+            + "</table>\n<h2>Security Exposure</h2>\n<table>\n"
+            + $"<tr><th>Known Breaches</th><td>{E(security.BreachCount.ToString())}</td></tr>\n"
+            + $"<tr><th>Password Exposure</th><td>{E(security.PasswordExposure)}</td></tr>\n"
+            + $"<tr><th>Password Hint Exposure</th><td>{E(security.PasswordHints)}</td></tr>\n"
+            + $"<tr><th>Authentication Data Exposure</th><td>{E(security.AuthData)}</td></tr>\n"
+            + $"<tr><th>Breach Severity</th><td>{E(security.Severity)}</td></tr>\n"
+            + "</table>\n<h2>Recommended Actions</h2>\n<ol>\n");
+        if (security.Recommendations.Length == 0)
+        {
+            sb.Append("<li>None evidenced; stay alert for phishing.</li>\n");
+        }
+
+        foreach (string recommendation in security.Recommendations)
+        {
+            sb.Append("<li>").Append(E(recommendation)).Append("</li>\n");
+        }
+
+        sb.Append("</ol>\n<p>Source: Have I Been Pwned (metadata only; values never retrieved).</p>\n"
+            + "<p>Email intelligence is approximate and limited to public sources.</p>\n"
             + "</body>\n</html>\n");
         return sb.ToString();
     }
@@ -177,6 +224,7 @@ public static class ReportService
         var dns = email["dns"] as System.Text.Json.Nodes.JsonObject;
         var av = email["avatar"] as System.Text.Json.Nodes.JsonObject;
         var risk = email["risk"] as System.Text.Json.Nodes.JsonObject;
+        var sec = email["security_exposure"] as System.Text.Json.Nodes.JsonObject;
         var lines = new List<string>
         {
             "IPTraceX Email Investigation Report",
@@ -198,11 +246,29 @@ public static class ReportService
             $"    Score        : {(risk?["score"]?.GetValue<int?>() is int score ? $"{score}/100" : "unknown")}",
             $"    Level        : {Str(risk?["level"])}",
             "",
+            "[4] SECURITY EXPOSURE",
+            $"    Known Breaches               : {SecInt(sec, "breach_count")}",
+            $"    Password Exposure            : {SecStr(sec, "password_exposure")}",
+            $"    Password Hint Exposure       : {SecStr(sec, "password_hints")}",
+            $"    Authentication Data Exposure : {SecStr(sec, "authentication_data")}",
+            $"    Breach Severity              : {SecStr(sec, "severity")}",
+            $"    Action Required              : {(SecBool(sec, "action_required") ? "YES" : "NO")}",
+            "    Source: Have I Been Pwned (metadata only; values never retrieved)",
+            "",
             "NOTE: Email intelligence is approximate and limited to public sources.",
             "",
         };
         return string.Join("\n", lines);
     }
+
+    private static string SecStr(System.Text.Json.Nodes.JsonObject? sec, string key)
+        => sec?[key]?.GetValue<string?>() is string text && text.Length != 0 ? text : "Unknown";
+
+    private static string SecInt(System.Text.Json.Nodes.JsonObject? sec, string key)
+        => sec?[key]?.GetValue<int?>()?.ToString() ?? "Unknown";
+
+    private static bool SecBool(System.Text.Json.Nodes.JsonObject? sec, string key)
+        => sec?[key]?.GetValue<bool?>() ?? false;
 
     private static string MxLine(System.Text.Json.Nodes.JsonObject? ed)
     {
@@ -223,6 +289,7 @@ public static class ReportService
         static string E(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "Unknown");
         var ed = email["email_domain"] as System.Text.Json.Nodes.JsonObject;
         var risk = email["risk"] as System.Text.Json.Nodes.JsonObject;
+        var sec = email["security_exposure"] as System.Text.Json.Nodes.JsonObject;
         return "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
             + "<title>IPTraceX Email Investigation Report</title>\n<style>\n"
             + "body{background:#0d1117;color:#e6edf3;font-family:monospace;max-width:900px;margin:2em auto;padding:0 1em}\n"
@@ -238,7 +305,14 @@ public static class ReportService
             + "</table>\n<h2>Risk</h2>\n<table>\n"
             + $"<tr><th>Score</th><td>{E(risk?["score"]?.GetValue<int?>()?.ToString() ?? "unknown")}</td></tr>\n"
             + $"<tr><th>Level</th><td>{E(risk?["level"]?.GetValue<string?>())}</td></tr>\n"
-            + "</table>\n<p>Email intelligence is approximate and limited to public sources.</p>\n"
+            + "</table>\n<h2>Security Exposure</h2>\n<table>\n"
+            + $"<tr><th>Known Breaches</th><td>{E(SecInt(sec, "breach_count"))}</td></tr>\n"
+            + $"<tr><th>Password Exposure</th><td>{E(SecStr(sec, "password_exposure"))}</td></tr>\n"
+            + $"<tr><th>Password Hint Exposure</th><td>{E(SecStr(sec, "password_hints"))}</td></tr>\n"
+            + $"<tr><th>Authentication Data Exposure</th><td>{E(SecStr(sec, "authentication_data"))}</td></tr>\n"
+            + $"<tr><th>Breach Severity</th><td>{E(SecStr(sec, "severity"))}</td></tr>\n"
+            + "</table>\n<p>Source: Have I Been Pwned (metadata only; values never retrieved).</p>\n"
+            + "<p>Email intelligence is approximate and limited to public sources.</p>\n"
             + "</body>\n</html>\n";
     }
 

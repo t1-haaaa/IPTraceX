@@ -31,6 +31,11 @@ domain intelligence, report generation, and investigation saving.
   token-gated commit authorship = MEDIUM confirmed-public signal).
 - Breach metadata (Have I Been Pwned, key-gated): breach name, domain,
   date, data classes — never passwords, hashes, tokens, or dumps.
+- Breach exposure alerts: normalized password/hint/token signals with
+  severity (`CRITICAL`/`HIGH`/`MEDIUM`/`LOW`) and evidence-driven
+  recommendations. `REPORTED` means a known breach lists that data
+  class; `NOT_REPORTED` means checked data shows none (not "safe");
+  `UNKNOWN` means no breach source is configured.
 - Transparent risk score with per-indicator weights and explanations.
 
 ## What it cannot discover
