@@ -58,6 +58,22 @@ public static class AppConfigLoader
             || Get("NO_COLOR").Length != 0;
         bool debug = IsTruthy(Get("IPTRACEX_DEBUG", "IPGHOST_DEBUG"));
 
+        int maxConcurrency = 4;
+        if (int.TryParse(Get("IPTRACEX_MAX_CONCURRENCY"), out int parsedConc))
+        {
+            maxConcurrency = Math.Min(Math.Max(parsedConc, 1), 16);
+        }
+
+        double globalTimeout = 90.0;
+        if (double.TryParse(
+                Get("IPTRACEX_GLOBAL_TIMEOUT"),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double parsedGlobal))
+        {
+            globalTimeout = Math.Min(Math.Max(parsedGlobal, 10.0), 600.0);
+        }
+
         return new AppConfig
         {
             ApiKey = Get("IPTRACEX_API_KEY", "IPGHOST_API_KEY"),
@@ -68,7 +84,32 @@ public static class AppConfigLoader
             ProjectRoot = projectRoot,
             Providers = ProviderRegistry.ResolveNames(Get("IPTRACEX_PROVIDERS", "IPGHOST_PROVIDERS")),
             IpInfoToken = Get("IPINFO_TOKEN"),
+            IntelProviders = ResolveIntel(Get("IPTRACEX_INTEL")),
+            MaxConcurrency = maxConcurrency,
+            GlobalTimeoutSeconds = globalTimeout,
+            RiskWeights = Get("IPTRACEX_RISK_WEIGHTS"),
+            AbuseIpDbKey = Get("IPTRACEX_ABUSEIPDB_KEY"),
         };
+    }
+
+    private static string[] ResolveIntel(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return ["ripestat", "doh-cloudflare", "doh-google", "system-dns", "tor-exits", "cloud-ranges"];
+        }
+
+        var names = new List<string>();
+        foreach (string part in raw.Split(','))
+        {
+            string key = part.Trim().ToLowerInvariant();
+            if (key.Length != 0 && !names.Contains(key, StringComparer.Ordinal))
+            {
+                names.Add(key);
+            }
+        }
+
+        return [.. names];
     }
 
     private static bool IsTruthy(string value)

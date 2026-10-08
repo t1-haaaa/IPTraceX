@@ -11,6 +11,15 @@ public sealed class AppConfig
     public string ProjectRoot { get; set; } = ".";
     public string[] Providers { get; set; } = ["ipwho.is", "ipapi.co", "ipinfo.io"];
     public string IpInfoToken { get; set; } = "";
+    public string[] IntelProviders { get; set; } =
+    [
+        "ripestat", "doh-cloudflare", "doh-google", "system-dns",
+        "tor-exits", "cloud-ranges",
+    ];
+    public int MaxConcurrency { get; set; } = 4;
+    public double GlobalTimeoutSeconds { get; set; } = 90.0;
+    public string RiskWeights { get; set; } = "";
+    public string AbuseIpDbKey { get; set; } = "";
 
     public static readonly string[] DefaultProviders = ["ipwho.is", "ipapi.co", "ipinfo.io"];
 }

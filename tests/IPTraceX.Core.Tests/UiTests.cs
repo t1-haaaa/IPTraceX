@@ -70,6 +70,19 @@ public sealed class UiTests
     }
 
     [Fact]
+    public void MainMenuNumbering()
+    {
+        string menu = Formatting.MainMenu(Plain);
+        foreach (string token in new[] { "[01]", "[02]", "[03]", "[04]", "[05]", "[06]", "[07]", "[08]", "[00]" })
+        {
+            Assert.Contains(token, menu);
+        }
+
+        Assert.Contains("Analyze IP", menu);
+        Assert.Contains("Analyze domain", menu);
+    }
+
+    [Fact]
     public void MenuNumberingAndSections()
     {
         string menu = Formatting.InteractiveMenu(Plain, true);

@@ -1,6 +1,6 @@
 using IPTraceX.Core;
 using IPTraceX.Infrastructure;
-using Microsoft.Extensions.Logging;
+using IPTraceX.Infrastructure.Providers;
 
 namespace IPTraceX.CLI;
 
@@ -17,4 +17,23 @@ public sealed class EngineAdapter : IAnalysisEngine
     public Task<GeoResult> AnalyzeAsync(
         string ip, Action<string>? onStage = null, CancellationToken cancellationToken = default)
         => _engine.AnalyzeAsync(ip, onStage, cancellationToken);
+}
+
+/// <summary>Production full-profile adapter (DI-friendly seam).</summary>
+public sealed class ProfileEngineAdapter : IProfileEngine
+{
+    private readonly IntelligenceProfiler _profiler;
+
+    public ProfileEngineAdapter(AppConfig config, IGeoJsonFetcher? fetcher = null)
+    {
+        _profiler = new IntelligenceProfiler(config, fetcher);
+    }
+
+    public Task<IntelligenceProfile> AnalyzeIpAsync(
+        string ip, Action<string>? onStage = null, CancellationToken cancellationToken = default)
+        => _profiler.AnalyzeIpAsync(ip, onStage, cancellationToken);
+
+    public Task<(DomainEvidence Resolution, List<IntelligenceProfile> Profiles)> AnalyzeDomainAsync(
+        string domain, Action<string>? onStage = null, CancellationToken cancellationToken = default)
+        => _profiler.AnalyzeDomainAsync(domain, onStage, cancellationToken);
 }

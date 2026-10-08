@@ -7,10 +7,10 @@
 
 A modern multi-provider IP intelligence and geolocation CLI for Linux.
 
-Three independent GeoIP sources. One honest answer — with consensus,
-confidence scoring, and every disagreement shown, never hidden.
-
-Maintained by **t1_haaa**.
+Enter an IP → receive a complete Intelligence Profile: location, network
+and ASN intelligence, DNS, VPN/proxy/Tor verdicts, an evidence-driven
+risk score, and a professional investigation report — every fact
+source-attributed, every disagreement shown.
 
 ```
    ___ ____ _____                    __  __
@@ -33,16 +33,13 @@ Maintained by **t1_haaa**.
     Country Code : DZ
     Region       : Wilaya de Bechar
     City         : Bechar
-    Latitude     : 31.616671
-    Longitude    : -2.21667
-    Timezone     : Africa/Algiers
 
-[+] GEOIP QUALITY
-    Providers    : 3/3
-    Agreement    : 3/3
-    Confidence   : HIGH
-    Source       : Multi-provider consensus
+[+] RISK ASSESSMENT
+    Score        : unknown
+    Level        : UNKNOWN
 ```
+
+Maintained by **t1_haaa**.
 
 > [!IMPORTANT]
 > IP geolocation is **approximate**. Results may represent ISP
@@ -71,19 +68,28 @@ Maintained by **t1_haaa**.
 
 ## About
 
-IPTraceX (formerly IPGHOST) takes a **public** IPv4/IPv6 address and
-returns network intelligence merged from three independent GeoIP
-providers. When sources disagree, it says so — per provider, in the open.
+IPTraceX (formerly IPGHOST) builds a complete, source-attributed
+Intelligence Profile for any **public** IPv4/IPv6 address: where providers
+agree, how confident each field is, what the network looks like (ASN,
+prefix, registry), what DNS says, whether Tor/hosting/proxy signals fire,
+and what it all means as a transparent risk score.
 
 ## Features
 
 - Multi-provider GeoIP (ipwho.is + ipapi.co + ipinfo.io)
-- IPv4 / IPv6, public-only validation, private rejection
-- Country / Region / City, ISP / Organization, ASN, hostname
-- Provider consensus + confidence scoring + disagreement detection
-- JSON output, batch mode, stdin mode, Google Maps links
-- Self public-IP detection, provider-aware cache
-- Security-first design, ASCII-first terminal UI, `--no-color` purity
+- ASN/BGP/registry intelligence (RIPEstat: prefix, holder, whois)
+- Reverse DNS from two independent DoH resolvers + system resolver
+- Domain → IP infrastructure analysis (A/AAAA, deduplicated)
+- Tor exit detection (official Tor Project list)
+- Hosting/cloud matching (official AWS/GCP/Cloudflare ranges)
+- Optional AbuseIPDB reputation (key-gated, skipped without key)
+- Evidence-driven risk score (configurable weights, UNKNOWN when dry)
+- Consensus + per-field confidence + visible disagreement
+- Investigation reports: txt, json, html
+- Interactive main menu + full direct CLI
+- JSON output (backward compatible, additive only)
+- Batch/stdin, provider-aware cache, Google Maps, self-IP detection
+- Security-first, ASCII-first terminal UI, `--no-color` purity
 - Linux/Kali CLI, self-contained .NET single binary
 
 ## Installation
@@ -99,26 +105,6 @@ chmod +x iptracex.sh
 ```
 
 No .NET install needed to run. No root, no sudo.
-
-On first run without a local binary, `./iptracex.sh` clears the screen,
-shows the IPTraceX header, then quietly downloads the official Linux
-release (`iptracex-linux-x64.tar.gz` from `t1-haaaa/IPTraceX`), verifies
-its SHA256 checksum, caches it under `.iptracex/bin/`, and executes it:
-
-```
-[::] Downloading official release...
-[+] Download complete.
-[::] Verifying release...
-[+] SHA256 verified.
-[+] IPTraceX is ready.
-```
-
-No curl progress noise; errors stay visible. Later runs reuse the cache —
-no network needed, no re-download. Force a refresh anytime:
-
-```bash
-./iptracex.sh --update
-```
 
 From the GitHub release instead:
 
@@ -136,6 +122,11 @@ chmod +x iptracex.sh
 > clear unsupported-platform message instead of failing obscurely. Windows
 > development/testing uses `dotnet run --project src/IPTraceX.CLI`.
 
+On first run without a local binary, `./iptracex.sh` clears the screen,
+shows the IPTraceX header, then quietly downloads the official Linux
+release, verifies its SHA256 checksum, caches it under `.iptracex/bin/`,
+and executes it. Later runs reuse the cache — no network needed.
+
 Build from source (developers):
 
 ```bash
@@ -145,7 +136,6 @@ dotnet test
 dotnet publish src/IPTraceX.CLI/IPTraceX.CLI.csproj -c Release \
   -r linux-x64 --self-contained true -p:PublishSingleFile=true \
   -o publish/linux-x64
-cp publish/linux-x64/IPTraceX ./IPTraceX   # staging only, never committed
 ```
 
 Or via helper: `./scripts/dev-publish-linux.sh`.
@@ -157,12 +147,16 @@ Or via helper: `./scripts/dev-publish-linux.sh`.
 ```
 
 ```
+[01] Analyze IP
+[02] Analyze domain
+[03] Self IP intelligence
+...
 [?] Enter public IP address:
 [-] 8.8.8.8
 ```
 
-Result: country, region, city, ISP/ASN, coordinates, Google Maps link,
-and a quality block (`Providers 3/3 · Agreement 3/3 · Confidence HIGH`).
+Result: location, ASN/prefix, DNS, anonymity verdicts, risk score,
+Google Maps link, and per-field confidence — all source-attributed.
 
 A real captured transcript lives in [`docs/demo.txt`](docs/demo.txt).
 
@@ -173,6 +167,10 @@ A real captured transcript lives in [`docs/demo.txt`](docs/demo.txt).
 ./iptracex.sh --json 8.8.8.8
 ./iptracex.sh --map 8.8.8.8
 ./iptracex.sh --self
+./iptracex.sh --domain example.com
+./iptracex.sh --rdns 8.8.8.8
+./iptracex.sh --report html 8.8.8.8
+./iptracex.sh --providers
 ./iptracex.sh --file ips.txt
 cat ips.txt | ./iptracex.sh --stdin
 ./iptracex.sh --no-color 8.8.8.8
@@ -180,20 +178,30 @@ cat ips.txt | ./iptracex.sh --stdin
 ./iptracex.sh --file tests/fixtures/ip_samples.txt
 ```
 
-Interactive menu after each lookup: analyze another IP, open Google Maps,
-export JSON, save report, exit. See `docs/usage.md`.
+Interactive menu after startup: analyze IP/domain, self IP, reverse DNS,
+provider status, batch file, investigation report, configuration, exit —
+plus the classic post-lookup actions. See `docs/usage.md`.
 
 ## Multi-Provider Engine
 
 ```
 public IP (validated once)
-  +--> ipwho.is --> normalized GeoResult --\
-  +--> ipapi.co --> normalized GeoResult ----+--> consensus vote
-  +--> ipinfo.io -> normalized GeoResult ---/    (failures recorded)
+  +--> ipwho.is ──────────────┐
+  +--> ipapi.co ──────────────┼--> geo consensus
+  +--> ipinfo.io ─────────────┘
+  +--> RIPEstat ── ASN/prefix/registry ──┐
+  +--> Cloudflare DoH ──┐                ├--> intel layer
+  +--> Google DoH ──────┼--> PTR ────────┤   (bounded concurrency,
+  +--> System DNS ──────┘                │    failure isolation)
+  +--> Tor exits ── list match ──────────┤
+  +--> Cloud ranges ── official feeds ───┤
+  +--> AbuseIPDB (optional key) ─────────┘
 ```
 
-Sequential queries (rate-limit friendly), per-provider cache, one failure
-never fails the lookup. Select/order via `IPTRACEX_PROVIDERS`.
+Geo providers run sequentially (rate-limit friendly); intel providers run
+with bounded concurrency (`IPTRACEX_MAX_CONCURRENCY`, default 4) under one
+global timeout. One failure never stops the investigation. Select/order
+via `IPTRACEX_PROVIDERS` and `IPTRACEX_INTEL`.
 
 ## Consensus
 
@@ -203,66 +211,114 @@ never fails the lookup. Select/order via `IPTRACEX_PROVIDERS`.
   never mapped from IP ranges by hand.
 - **Coordinates** cluster within 100 km (haversine); outliers dropped.
 - **ISP** matches ignoring case/corporate suffixes; **ASN** by digits.
-- **Confidence**: 3/3 → HIGH, 2/3 → MEDIUM, 1/3 → LOW, 0 → UNKNOWN
-  (single source → MEDIUM, uncorroborated).
+- **Confidence**: unanimous (2+) → HIGH; single source → MEDIUM;
+  ratio ≥ 0.5 → MEDIUM; below → LOW; none → UNKNOWN. Per-field confidence
+  (country/region/city/asn) is computed and shown.
 - Disagreements render per provider under `[!] GEOIP PROVIDER DISAGREEMENT`.
+
+See `docs/consensus.md`.
+
+## Risk Score
+
+Evidence-driven and fully itemized — every point shows its indicator,
+severity, source, evidence, weight and explanation:
+
+```
+[+] RISK ASSESSMENT
+    Score        : 35/100
+    Level        : LOW
+    +35 Tor exit node [HIGH] (tor-exits)
+```
+
+Defaults: tor 35, proxy 20, hosting 15, vpn 15, abuse ≤25 (scaled).
+Levels: 0–19 VERY LOW, 20–39 LOW, 40–59 MEDIUM, 60–79 HIGH, 80–100
+CRITICAL. No evidence → UNKNOWN (never manufactured certainty).
+Weights tunable via `IPTRACEX_RISK_WEIGHTS`. See `docs/risk-engine.md`.
+
+Tor = official exit list (HIGH both ways). Hosting = official cloud
+ranges only. VPN/proxy = `UNKNOWN` unless the optional AbuseIPDB key is
+configured — cloud ownership alone is never treated as VPN evidence.
+
+## ASN Intelligence
+
+Prefix + covering ASNs (RIPEstat network-info), holder and registry data
+(RIPEstat whois: NetName, Organization, Country), merged with consensus
+ASN/ISP. Displayed with per-fact sources.
+
+## Domain Analysis
+
+```bash
+./iptracex.sh --domain example.com
+```
+
+Resolves A/AAAA via the system resolver (DNS only — no port scanning,
+no active probing), drops non-public hits, and builds a full profile per
+discovered IP plus an infrastructure summary.
+
+## Reverse DNS
+
+```bash
+./iptracex.sh --rdns 8.8.8.8
+```
+
+PTR from Cloudflare DoH + Google DoH + system resolver. Corroborated
+(2+) → HIGH; single → MEDIUM; conflicting → LOW; none observed →
+`none observed`.
+
+## Reports
+
+```bash
+./iptracex.sh --report html 8.8.8.8
+./iptracex.sh --report json 8.8.8.8
+./iptracex.sh --report txt 8.8.8.8
+```
+
+Saved under `reports/YYYY-MM-DD/` with safe filenames: metadata, target,
+location, network, ASN, DNS, anonymity, risk + evidence, providers,
+consensus/confidence, errors, timestamp, tool version. See
+`docs/reports.md`.
 
 ## JSON Output
 
-`--json` prints pure machine-readable JSON (no banner, no colors):
-
-```json
-{
-  "ip": "8.8.8.8",
-  "ip_version": 4,
-  "geolocation": {
-    "country": "United States",
-    "country_code": "US",
-    "region": "California",
-    "city": "Mountain View",
-    "latitude": 37.386,
-    "longitude": -122.0838,
-    "timezone": "America/Los_Angeles"
-  },
-  "network": { "isp": "Google LLC", "asn": "AS15169" },
-  "google_maps_url": "https://www.google.com/maps?q=37.386,-122.0838",
-  "geoip_quality": {
-    "providers_queried": 3,
-    "providers_successful": 3,
-    "providers_agreeing": 3,
-    "confidence": "high",
-    "agreement_ratio": 1.0
-  },
-  "providers": []
-}
-```
+`--json` prints pure machine-readable JSON (no banner, no colors).
+Original keys (`ip`, `ip_version`, `geolocation`, `network`,
+`google_maps_url`, `geoip_quality`, `providers`) are frozen; new
+sections (`target`, `dns`, `security`, `risk`, `asn`, `consensus`,
+`metadata`) are additive.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `IPTRACEX_PROVIDERS` | `ipwho.is,ipapi.co,ipinfo.io` | Providers + priority |
+| `IPTRACEX_PROVIDERS` | `ipwho.is,ipapi.co,ipinfo.io` | Geo providers + priority |
+| `IPTRACEX_INTEL` | `ripestat,doh-cloudflare,doh-google,system-dns,tor-exits,cloud-ranges` | Intel providers |
 | `IPINFO_TOKEN` | empty | Optional ipinfo.io token |
+| `IPTRACEX_ABUSEIPDB_KEY` | empty | Optional AbuseIPDB key (enables reputation) |
 | `IPTRACEX_TIMEOUT` | `10` | Per-provider seconds (1–60) |
-| `IPTRACEX_CACHE_TTL` | `3600` | `0` disables cache |
+| `IPTRACEX_GLOBAL_TIMEOUT` | `90` | Whole-investigation seconds (10–600) |
+| `IPTRACEX_MAX_CONCURRENCY` | `4` | Intel providers in flight (1–16) |
+| `IPTRACEX_RISK_WEIGHTS` | defaults | e.g. `tor=35,proxy=20` |
+| `IPTRACEX_CACHE_TTL` | `3600` | Seconds, `0` disables cache |
 | `IPTRACEX_NO_COLOR` / `NO_COLOR` | empty | Plain output |
 | `IPTRACEX_DEBUG` | empty | Verbose technical details |
 
-Copy `.env.example` to `.env` (git-ignored). See `docs/configuration.md`.
+Legacy `IPGHOST_*` names remain as deprecated aliases. Copy
+`.env.example` to `.env` (git-ignored). See `docs/configuration.md`.
 
 ## Security
 
 HTTPS only, timeouts everywhere, bounded retry (never 429/401/403),
 no shell execution, no secrets in code/tests/CI, validated provider JSON
-and coordinates, sanitized filenames. Full policy: `SECURITY.md`,
-controls: `docs/security.md`.
+and coordinates, sanitized filenames, traversal-checked output paths.
+Full policy: `SECURITY.md`, controls: `docs/security.md`.
 
 ## Architecture
 
 ```
 src/IPTraceX.Core/            dependency-free rules (models, validation,
-                              consensus, maps, cache, JSON contract)
-src/IPTraceX.Infrastructure/  I/O edges (HTTPS, providers, engine,
+                              consensus, risk, maps, cache, JSON contract)
+src/IPTraceX.Infrastructure/  I/O edges (HTTPS, 10 providers, geo engine,
+                              intel orchestrator, profiler, reports,
                               config, logging, self-IP)
 src/IPTraceX.CLI/             terminal UI + every mode
 tests/IPTraceX.Core.Tests/    xUnit, fully mocked
@@ -287,52 +343,16 @@ single shared `HttpClient`, no `Thread.Sleep` on network paths.
 ```bash
 dotnet test                                   # unit (mocked, offline)
 IPTRACEX_LIVE=1 dotnet test --filter Integration  # live providers
+./tests/launcher/run_tests.sh                 # launcher behavior
 ```
 
-Covers IPv4/IPv6, private rejection, invalid input, normalization,
-failures (timeout/429/5xx/malformed/missing), consensus, disagreement,
-confidence, coordinates, JSON contract, CLI modes, no-color, batch,
-dedup, cache isolation, Maps URLs, encoding edges, safe filenames.
-
-Launcher behavior is covered separately (no framework, plain bash):
-
-```bash
-./tests/launcher/run_tests.sh
-```
-
-It checks binary resolution order, argument forwarding, exit codes,
-SHA256 accept/reject, untrusted-URL refusal, arch gating, the Windows
-platform message, and — on Linux with network — the real
-download → verify → cache → execute flow plus cache reuse.
-
-## Building
-
-```bash
-dotnet publish src/IPTraceX.CLI/IPTraceX.CLI.csproj -c Release \
-  -r linux-x64 --self-contained true -p:PublishSingleFile=true \
-  -o publish/linux-x64
-```
-
-or the helper `./scripts/dev-publish-linux.sh` (developers/CI only —
-never called by `iptracex.sh`).
-
-## Release
-
-Each release ships:
-
-- `iptracex-linux-x64.tar.gz` — contains the `IPTraceX` ELF binary
-- `SHA256SUMS` — checksums the launcher verifies before executing
-
-## Troubleshooting
-
-| Symptom | Meaning |
-|---------|---------|
-| `[ERROR] IPTraceX Linux binary cannot run on Windows/Git Bash.` | Expected on Windows — use Kali/WSL/Linux or `dotnet run` for development. Never an `Exec format error`. |
-| `[ERROR] Unsupported architecture: aarch64` | Only linux-x64 releases exist today; no ARM claims. |
-| `[ERROR] Unable to download IPTraceX.` | No network or no curl/wget — check connection or place an `IPTraceX` binary next to `iptracex.sh` for offline use. |
-| `[ERROR] SHA256 verification failed.` | Untrusted download deleted automatically; retry or use an offline binary. |
-| `[ERROR] IPTraceX Linux binary not found.` | No local binary and download impossible — see above. |
-| `zsh: corrupt history file ~/.zsh_history` | A shell-level issue, unrelated to IPTraceX. IPTraceX never touches shell history — it only clears the visible screen on interactive start. |
+Covers IPv4/IPv6, private/loopback/multicast/reserved rejection, invalid
+input, normalization ×7 providers, failures (timeout/429/5xx/malformed/
+missing), consensus, disagreement, confidence, coordinates, risk levels,
+Tor/DoH/cloud parsing, ASN parsing, DNS parsing, domain resolution,
+JSON contract + compatibility, CLI modes/flags, menu, no-color, batch,
+dedup, cache isolation + provider isolation, Maps URLs, encoding edges,
+safe filenames, reports, provider registry.
 
 ## Contributing
 
@@ -342,8 +362,10 @@ See `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md`.
 
 IP geolocation is approximate. Results may represent ISP registration,
 network infrastructure, VPN/proxy exit points, or provider estimates
-rather than a user's physical location. Use only for lawful and
-authorized purposes. Do not claim exact physical location.
+rather than a user's physical location. Risk scores are heuristic
+summaries of observed evidence, not verdicts. Use only for lawful and
+authorized purposes (network administration, troubleshooting, security
+research, education). Do not claim exact physical location.
 
 ## License
 

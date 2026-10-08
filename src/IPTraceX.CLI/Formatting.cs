@@ -175,4 +175,112 @@ public static class Formatting
 
     public static string BatchSummary(Palette p, int ok, int failed)
         => $"{p.TokenInfo()} Completed: {ok}\n{p.TokenInfo()} Failed: {failed}";
+
+    public static string FormatProfile(IntelligenceProfile profile, Palette p)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("TARGET")}",
+            $"    Target       : {p.Data(profile.Target)}",
+            $"    Type         : {p.Data(profile.IsDomainTarget ? "Domain" : profile.Geo.IpVersion == 6 ? "IPv6" : "IPv4")}",
+            "",
+        };
+        // Reuse the classic geo/network/maps/quality rendering verbatim.
+        lines.Add(FormatReport(profile.Geo, p).Trim('\n'));
+        lines.Add("");
+        var asn = profile.Asn;
+        lines.Add($"{p.TokenOk()} {p.Brand("ASN INTELLIGENCE")}");
+        lines.Add($"    ASN          : {p.Data(V(asn.Asn))}");
+        lines.Add($"    Organization : {p.Data(V(asn.Organization))}");
+        lines.Add($"    Network Name : {p.Data(V(asn.NetworkName))}");
+        lines.Add($"    Prefix       : {p.Data(V(asn.Prefix))}");
+        lines.Add($"    Registry     : {p.Data(V(asn.Registry))}");
+        lines.Add($"    Country      : {p.Data(V(asn.Country))}");
+        lines.Add("");
+        var dns = profile.Dns;
+        lines.Add($"{p.TokenOk()} {p.Brand("DNS INTELLIGENCE")}");
+        lines.Add($"    PTR          : {p.Data(dns.PtrHostnames.Length == 0 ? "none observed" : string.Join(", ", dns.PtrHostnames))}");
+        lines.Add($"    Confidence   : {p.Data(dns.Confidence)}");
+        lines.Add("");
+        var anon = profile.Anonymity;
+        lines.Add($"{p.TokenOk()} {p.Brand("ANONYMITY")}");
+        lines.Add($"    Tor          : {p.Data(Show(anon.Tor))} ({anon.Tor.Confidence})");
+        lines.Add($"    VPN          : {p.Data(Show(anon.Vpn))} ({anon.Vpn.Confidence})");
+        lines.Add($"    Proxy        : {p.Data(Show(anon.Proxy))} ({anon.Proxy.Confidence})");
+        lines.Add($"    Hosting      : {p.Data(Show(anon.Hosting))} ({anon.Hosting.Confidence})");
+        lines.Add("");
+        var risk = profile.Risk;
+        lines.Add($"{p.TokenOk()} {p.Brand("RISK ASSESSMENT")}");
+        lines.Add($"    Score        : {p.Data(risk.Score.HasValue ? $"{risk.Score}/100" : "unknown")}");
+        lines.Add($"    Level        : {p.Data(risk.Level)}");
+        foreach (RiskEvidence e in risk.Evidence)
+        {
+            lines.Add($"    +{e.Weight,-3} {p.Data(e.Indicator)} [{e.Severity}] ({e.Source})");
+            lines.Add($"         {e.Evidence}");
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenOk()} {p.Brand("FIELD CONFIDENCE")}");
+        foreach (FieldConfidence field in profile.FieldConfidences)
+        {
+            lines.Add($"    {field.Field,-12} : {p.Data(field.Value ?? "Unknown")} ({field.Confidence.ToUpperInvariant()}, {field.Agreeing}/{field.Successful})");
+        }
+
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    private static string Show(AnonymitySignal signal)
+        => signal.Status switch
+        {
+            DetectionStatus.Detected => "DETECTED",
+            DetectionStatus.NotDetected => "NOT DETECTED",
+            _ => "UNKNOWN",
+        };
+
+    public static string FormatProviders(
+        Palette p,
+        IReadOnlyList<ProviderDescriptor> descriptors,
+        IReadOnlyDictionary<string, string> health)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("PROVIDER HEALTH")}",
+            "",
+        };
+        foreach (ProviderDescriptor descriptor in descriptors)
+        {
+            string state = health.TryGetValue(descriptor.Id, out string? value)
+                ? value
+                : "UNKNOWN (not queried yet)";
+            lines.Add($"    {p.Data(descriptor.Id.PadRight(14))} : {state}");
+            lines.Add($"      {descriptor.DisplayName} [{descriptor.Category}] "
+                + $"IPv{string.Join("/IPv", descriptor.SupportedIpVersions)}"
+                + (descriptor.RequiresKey ? " (key required)" : " (no key)"));
+        }
+
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    public static string MainMenu(Palette p)
+        => string.Join("\n", new[]
+        {
+            "",
+            $"{p.TokenInfo()} Main menu",
+            "",
+            "[01] Analyze IP",
+            "[02] Analyze domain",
+            "[03] Self IP intelligence",
+            "[04] Reverse DNS",
+            "[05] Provider status",
+            "[06] Batch analysis from file",
+            "[07] Generate investigation report",
+            "[08] Configuration",
+            "[00] Exit",
+            "",
+            $"{p.TokenAsk()} Select an option:",
+        });
 }

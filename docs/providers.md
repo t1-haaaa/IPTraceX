@@ -1,8 +1,33 @@
 # Providers
 
-IPTraceX queries independent GeoIP sources sequentially (reliability over
-raw speed — no thread storms against free-tier rate limits) and merges
-them with the consensus engine (`Consensus` in Core).
+IPTraceX queries independent sources through a plugin framework
+(`IIntelProvider` + `IGeoProvider`, central `ProviderCatalog`, bounded
+concurrency orchestrator with health tracking). Any capability can grow to
+dozens of adapters without structural changes.
+
+## Capability matrix
+
+| ID | Name | Category | IPv4 | IPv6 | Auth | Rate limits |
+|----|------|----------|------|------|------|-------------|
+| ipwho.is | ipwho.is | Geo | yes | yes | none | free tier; 429 respected |
+| ipapi.co | ipapi.co | Geo | yes | yes | none | ~1000/day; 429 respected |
+| ipinfo.io | IPinfo | Geo | yes | yes | optional `IPINFO_TOKEN` | anonymous throttled |
+| ripestat | RIPEstat | ASN | yes | yes | none | fair use; tiny responses |
+| doh-cloudflare | Cloudflare DoH | DNS | yes | yes | none | public resolver |
+| doh-google | Google DoH | DNS | yes | yes | none | public resolver |
+| system-dns | System DNS | DNS | yes | yes | none | local resolver |
+| tor-exits | Tor Exits | Security | yes | yes | none | 1 list, cached 6h |
+| cloud-ranges | Cloud Ranges | Cloud | yes | yes | none | official feeds, cached 24h |
+| abuseipdb | AbuseIPDB | Reputation | yes | no¹ | `IPTRACEX_ABUSEIPDB_KEY` | 1000/day free |
+
+¹ IPv6 check endpoint exists but is untested here; the adapter targets
+IPv4 only and skips otherwise.
+
+Dropped with reason: **BGPView** (`api.bgpview.io` does not resolve —
+cannot verify, so not integrated; RIPEstat covers ASN/prefix needs).
+Deferred: ARIN RDAP (registration depth), MaxMind (licensing).
+
+## Consensus (how the final answer is built)
 
 ## Active providers (default order)
 

@@ -3,6 +3,7 @@ using System.Text.Json;
 using IPTraceX.CLI;
 using IPTraceX.Core;
 using IPTraceX.Infrastructure;
+using IPTraceX.Infrastructure.Providers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -12,12 +13,16 @@ namespace IPTraceX.Core.Tests;
 internal sealed class FakeFetcher : IGeoJsonFetcher
 {
     private readonly Func<string, JsonElement?> _handler;
+    private readonly Func<string, string> _textHandler;
 
     public List<string> Urls { get; } = [];
 
-    public FakeFetcher(Func<string, JsonElement?> handler)
+    public FakeFetcher(
+        Func<string, JsonElement?> handler,
+        Func<string, string>? textHandler = null)
     {
         _handler = handler;
+        _textHandler = textHandler ?? (_ => "");
     }
 
     public static JsonElement? Json(string? raw)
@@ -39,6 +44,44 @@ internal sealed class FakeFetcher : IGeoJsonFetcher
         Urls.Add(url);
         return Task.FromResult(_handler(url));
     }
+
+    public Task<string> FetchTextAsync(
+        string url, double timeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        Urls.Add(url);
+        return Task.FromResult(_textHandler(url));
+    }
+}
+
+internal sealed class FakeProfileEngine : IProfileEngine
+{
+    private readonly Func<string, IntelligenceProfile> _handler;
+    private readonly Exception? _error;
+
+    public FakeProfileEngine(
+        Func<string, IntelligenceProfile>? handler = null, Exception? error = null)
+    {
+        _handler = handler ?? (_ => Sample.Profile());
+        _error = error;
+    }
+
+    public Task<IntelligenceProfile> AnalyzeIpAsync(
+        string ip, Action<string>? onStage = null, CancellationToken cancellationToken = default)
+    {
+        if (_error is not null)
+        {
+            throw _error;
+        }
+
+        return Task.FromResult(_handler(ip));
+    }
+
+    public Task<(DomainEvidence Resolution, List<IntelligenceProfile> Profiles)> AnalyzeDomainAsync(
+        string domain, Action<string>? onStage = null, CancellationToken cancellationToken = default)
+        => Task.FromResult<(DomainEvidence, List<IntelligenceProfile>)>(
+            (new DomainEvidence("system-dns", true, null, domain, ["1.2.3.4"], ["2001:db8::1"]),
+                [_handler("1.2.3.4")]));
 }
 
 internal sealed class FakeEngine : IAnalysisEngine
@@ -111,6 +154,36 @@ internal static class Sample
         AgreementRatio = 1.0,
     };
 
+    public static IntelligenceProfile Profile() => new(
+        "35.94.45.221", 4, false, Result(),
+        new AsnIntelligence(
+            "AS16509", "Amazon.com, Inc.", null, "35.92.0.0/16", "ARIN",
+            "US", "AMAZON-EC2", ["geo-consensus", "ripestat"]),
+        new DnsIntelligence(
+            "35.94.45.221", ["ec2-35-94-45-221.example"], "MEDIUM",
+            ["doh-cloudflare", "doh-google"]),
+        new AnonymityIntelligence(
+            new AnonymitySignal(DetectionStatus.NotDetected, "HIGH", ["tor-exits"], "absent"),
+            new AnonymitySignal(DetectionStatus.Unknown, "UNKNOWN", [], "no source"),
+            new AnonymitySignal(DetectionStatus.Unknown, "UNKNOWN", [], "no source"),
+            new AnonymitySignal(DetectionStatus.Detected, "HIGH", ["cloud-ranges"], "AWS match")),
+        new RiskAssessment(15, "VERY LOW",
+            [new RiskEvidence("Hosting/datacenter", "LOW", "cloud-ranges", "AWS", 15, "hosting")],
+            true),
+        [
+            new FieldConfidence("country", "United States", "high", 3, 3),
+            new FieldConfidence("region", "Oregon", "high", 3, 3),
+            new FieldConfidence("city", "Boardman", "high", 3, 3),
+            new FieldConfidence("asn", "AS16509", "high", 3, 3),
+        ],
+        [
+            new ProviderOutcome("ipwho.is", "success", null, "United States / Oregon", null),
+            new ProviderOutcome("ripestat", "success", null, "AS16509", null),
+        ],
+        new InvestigationMetadata(
+            "1.0.0", DateTimeOffset.UtcNow, 12,
+            ["ipwho.is", "ripestat"], 2, false));
+
     public static AppConfig TestConfig() => new()
     {
         TimeoutSeconds = 5,
@@ -125,7 +198,9 @@ internal static class Sample
         AppConfig? config = null,
         Func<CancellationToken, Task<string>>? detectSelf = null,
         StringWriter? output = null,
-        StringWriter? errors = null)
+        StringWriter? errors = null,
+        IProfileEngine? profiles = null,
+        Exception? profileError = null)
     {
         output ??= new StringWriter();
         errors ??= new StringWriter();
@@ -137,6 +212,7 @@ internal static class Sample
             errors,
             NullLogger.Instance,
             engine,
-            detectSelf);
+            detectSelf,
+            profiles ?? new FakeProfileEngine(error: profileError));
     }
 }

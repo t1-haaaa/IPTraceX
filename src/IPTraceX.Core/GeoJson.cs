@@ -90,4 +90,101 @@ public static class GeoJson
 
     public static JsonObject FromResult(GeoResult info)
         => JsonNode.Parse(ToJsonString(info))!.AsObject();
+
+    // ---- Full intelligence profile (legacy keys preserved verbatim) ----
+
+    private sealed record AnonSignalDto(string Status, string Confidence, string[] Sources, string Evidence);
+
+    private sealed record AnonymityDto(
+        [property: JsonPropertyName("tor")] AnonSignalDto Tor,
+        [property: JsonPropertyName("vpn")] AnonSignalDto Vpn,
+        [property: JsonPropertyName("proxy")] AnonSignalDto Proxy,
+        [property: JsonPropertyName("hosting")] AnonSignalDto Hosting);
+
+    private sealed record AsnDto(
+        [property: JsonPropertyName("asn")] string? Asn,
+        [property: JsonPropertyName("organization")] string? Organization,
+        [property: JsonPropertyName("network_name")] string? NetworkName,
+        [property: JsonPropertyName("prefix")] string? Prefix,
+        [property: JsonPropertyName("registry")] string? Registry,
+        [property: JsonPropertyName("country")] string? Country,
+        [property: JsonPropertyName("holder")] string? Holder,
+        [property: JsonPropertyName("sources")] string[] Sources);
+
+    private sealed record DnsDto(
+        [property: JsonPropertyName("ip")] string Ip,
+        [property: JsonPropertyName("ptr_hostnames")] string[] PtrHostnames,
+        [property: JsonPropertyName("confidence")] string Confidence,
+        [property: JsonPropertyName("sources")] string[] Sources);
+
+    private sealed record RiskEvidenceDto(
+        [property: JsonPropertyName("indicator")] string Indicator,
+        [property: JsonPropertyName("severity")] string Severity,
+        [property: JsonPropertyName("source")] string Source,
+        [property: JsonPropertyName("evidence")] string Evidence,
+        [property: JsonPropertyName("weight")] int Weight,
+        [property: JsonPropertyName("explanation")] string Explanation);
+
+    private sealed record RiskDto(
+        [property: JsonPropertyName("score")] int? Score,
+        [property: JsonPropertyName("level")] string Level,
+        [property: JsonPropertyName("evidence")] List<RiskEvidenceDto> Evidence,
+        [property: JsonPropertyName("has_sufficient_evidence")] bool HasSufficientEvidence);
+
+    private sealed record FieldConfidenceDto(
+        [property: JsonPropertyName("field")] string Field,
+        [property: JsonPropertyName("value")] string? Value,
+        [property: JsonPropertyName("confidence")] string Confidence,
+        [property: JsonPropertyName("agreeing")] int Agreeing,
+        [property: JsonPropertyName("successful")] int Successful);
+
+    private sealed record MetadataDto(
+        [property: JsonPropertyName("tool_version")] string ToolVersion,
+        [property: JsonPropertyName("timestamp_utc")] string TimestampUtc,
+        [property: JsonPropertyName("duration_ms")] long DurationMs,
+        [property: JsonPropertyName("providers_queried")] string[] ProvidersQueried,
+        [property: JsonPropertyName("providers_successful")] int ProvidersSuccessful,
+        [property: JsonPropertyName("has_cached_results")] bool HasCachedResults);
+
+    private static AnonymityDto Anon(IntelligenceProfile profile)
+    {
+        static AnonSignalDto Sig(AnonymitySignal s)
+            => new(s.Status.ToString().ToUpperInvariant(), s.Confidence, s.Sources, s.Evidence);
+        return new AnonymityDto(
+            Sig(profile.Anonymity.Tor), Sig(profile.Anonymity.Vpn),
+            Sig(profile.Anonymity.Proxy), Sig(profile.Anonymity.Hosting));
+    }
+
+    public static JsonObject FromProfile(IntelligenceProfile profile)
+    {
+        JsonObject legacy = FromResult(profile.Geo);
+        legacy["target"] = profile.Target;
+        legacy["dns"] = JsonSerializer.SerializeToNode(new DnsDto(
+            profile.Dns.Ip, profile.Dns.PtrHostnames,
+            profile.Dns.Confidence, profile.Dns.Sources), Relaxed);
+        legacy["security"] = JsonSerializer.SerializeToNode(Anon(profile), Relaxed);
+        legacy["risk"] = JsonSerializer.SerializeToNode(new RiskDto(
+            profile.Risk.Score, profile.Risk.Level,
+            profile.Risk.Evidence.Select(e => new RiskEvidenceDto(
+                e.Indicator, e.Severity, e.Source, e.Evidence, e.Weight, e.Explanation)).ToList(),
+            profile.Risk.HasSufficientEvidence), Relaxed);
+        legacy["asn"] = JsonSerializer.SerializeToNode(new AsnDto(
+            profile.Asn.Asn, profile.Asn.Organization, profile.Asn.NetworkName,
+            profile.Asn.Prefix, profile.Asn.Registry, profile.Asn.Country,
+            profile.Asn.Holder, profile.Asn.Sources), Relaxed);
+        legacy["consensus"] = JsonSerializer.SerializeToNode(
+            profile.FieldConfidences.Select(f => new FieldConfidenceDto(
+                f.Field, f.Value, f.Confidence, f.Agreeing, f.Successful)).ToList(), Relaxed);
+        legacy["metadata"] = JsonSerializer.SerializeToNode(new MetadataDto(
+            profile.Metadata.ToolVersion,
+            profile.Metadata.TimestampUtc.ToString("o"),
+            profile.Metadata.DurationMs,
+            profile.Metadata.ProvidersQueried,
+            profile.Metadata.ProvidersSuccessful,
+            profile.Metadata.HasCachedResults), Relaxed);
+        return legacy;
+    }
+
+    public static string ProfileToJsonString(IntelligenceProfile profile, bool indented = false)
+        => FromProfile(profile).ToJsonString(indented ? RelaxedIndented : Relaxed);
 }

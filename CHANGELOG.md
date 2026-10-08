@@ -5,6 +5,12 @@ Format follows Keep a Changelog; versions follow SemVer.
 
 ## Unreleased
 
+- feat: IP Intelligence 2.0 — full profiles (ASN, DNS, anonymity, risk),
+  plugin provider framework (10 adapters: 3 geo, RIPEstat, 2× DoH, system
+  DNS, Tor exits, cloud ranges, optional AbuseIPDB), bounded-concurrency
+  orchestrator with health tracking, transparent risk engine, domain and
+  reverse-DNS analysis, txt/json/html investigation reports, redesigned
+  main menu, additive JSON sections (legacy keys frozen).
 - feat: clean launch experience — terminal clear on interactive start,
   quiet official-release bootstrap (no curl progress, visible errors),
   developer branding (`[::] Developer: t1_haaa`), launcher `--debug`

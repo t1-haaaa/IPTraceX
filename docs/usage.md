@@ -16,25 +16,9 @@
 ./iptracex.sh
 ```
 
-```
-[?] Enter public IP address:
-[-] 8.8.8.8
-```
-
-After a lookup:
-
-```
-[::] Actions
-
-[01] Analyze another IP
-[02] Open location in Google Maps
-[03] Export JSON
-[04] Save report
-[00] Exit
-
-[?] Select an option:
-[-]
-```
+A main menu offers: analyze IP / domain, self IP, reverse DNS, provider
+status, batch file, investigation report, configuration, exit.
+Post-lookup actions (maps, JSON, report) are unchanged.
 
 ## One-shot modes
 
@@ -43,6 +27,10 @@ After a lookup:
 ./iptracex.sh --json 8.8.8.8
 ./iptracex.sh --map 8.8.8.8
 ./iptracex.sh --self
+./iptracex.sh --domain example.com
+./iptracex.sh --rdns 8.8.8.8
+./iptracex.sh --report html 8.8.8.8
+./iptracex.sh --providers
 ./iptracex.sh --file ips.txt
 cat ips.txt | ./iptracex.sh --stdin
 ./iptracex.sh --help
@@ -67,6 +55,6 @@ additive; the original keys are frozen.
 ## Batch and stdin
 
 Blank lines, `#` comments, duplicates, invalid IPs, and per-IP provider
-failures are handled without stopping the batch. A per-provider
-concurrency storm is deliberately avoided: providers are queried
-sequentially for reliability and rate-limit friendliness.
+failures are handled without stopping the batch. Geo providers are
+queried sequentially for reliability; intel providers run under bounded
+concurrency (`IPTRACEX_MAX_CONCURRENCY`) with failure isolation.

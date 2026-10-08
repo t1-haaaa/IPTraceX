@@ -1,4 +1,5 @@
 using IPTraceX.Core;
+using IPTraceX.Infrastructure.Providers;
 using Microsoft.Extensions.Logging;
 
 namespace IPTraceX.CLI;
@@ -8,6 +9,16 @@ public interface IAnalysisEngine
 {
     Task<GeoResult> AnalyzeAsync(
         string ip, Action<string>? onStage = null, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Full-profile seam (production profiler or test fake).</summary>
+public interface IProfileEngine
+{
+    Task<IntelligenceProfile> AnalyzeIpAsync(
+        string ip, Action<string>? onStage = null, CancellationToken cancellationToken = default);
+
+    Task<(DomainEvidence Resolution, List<IntelligenceProfile> Profiles)> AnalyzeDomainAsync(
+        string domain, Action<string>? onStage = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>All CLI modes. I/O injected for testability; logic mirrors the former tool.</summary>
@@ -27,6 +38,7 @@ public sealed class CliApp
     private readonly TextWriter _error;
     private readonly ILogger _logger;
     private readonly IAnalysisEngine _engine;
+    private readonly IProfileEngine _profiles;
     private readonly Func<CancellationToken, Task<string>> _detectSelf;
 
     public CliApp(
@@ -37,7 +49,8 @@ public sealed class CliApp
         TextWriter error,
         ILogger logger,
         IAnalysisEngine engine,
-        Func<CancellationToken, Task<string>>? detectSelf = null)
+        Func<CancellationToken, Task<string>>? detectSelf = null,
+        IProfileEngine? profileEngine = null)
     {
         _config = config;
         _palette = palette;
@@ -46,6 +59,7 @@ public sealed class CliApp
         _error = error;
         _logger = logger;
         _engine = engine;
+        _profiles = profileEngine ?? new ProfileEngineAdapter(config);
         _detectSelf = detectSelf ?? (ct => Infrastructure.SelfIp.DetectAsync(config.TimeoutSeconds, null, ct));
     }
 
@@ -60,7 +74,11 @@ public sealed class CliApp
         bool Debug,
         double? Timeout,
         bool Version,
-        bool Help);
+        bool Help,
+        string? Domain,
+        string? Rdns,
+        string? Report,
+        bool Providers);
 
     public async Task<int> RunAsync(string[] args, CancellationToken ct = default)
     {
@@ -109,6 +127,11 @@ public sealed class CliApp
             return await RunBatchAsync(lines, ct).ConfigureAwait(false);
         }
 
+        if (opts.Providers)
+        {
+            return ShowProviders();
+        }
+
         if (opts.Map)
         {
             if (opts.Ip is null && !opts.Self)
@@ -126,6 +149,21 @@ public sealed class CliApp
             return await RunMapAsync(target, ct).ConfigureAwait(false);
         }
 
+        if (opts.Rdns is not null)
+        {
+            return await RunRdnsAsync(opts.Rdns, ct).ConfigureAwait(false);
+        }
+
+        if (opts.Domain is not null)
+        {
+            if (opts.Report is not null)
+            {
+                return await RunDomainReportAsync(opts.Domain, opts.Report, ct).ConfigureAwait(false);
+            }
+
+            return await RunDomainAsync(opts.Domain, opts.Json, ct).ConfigureAwait(false);
+        }
+
         if (opts.Self)
         {
             string? target = await ResolveSelfAsync(ct).ConfigureAwait(false);
@@ -134,23 +172,39 @@ public sealed class CliApp
                 return ExitProvider;
             }
 
+            if (opts.Report is not null)
+            {
+                return await RunProfileReportAsync(target, opts.Report, ct).ConfigureAwait(false);
+            }
+
             if (!opts.Json)
             {
                 _output.WriteLine(
                     $"{_palette.TokenInfo()} Note: result reflects your public exit IP (VPN/proxy aware).");
             }
 
-            return await RunSingleAsync(target, opts.Json, ct).ConfigureAwait(false);
+            return await RunProfileAsync(target, opts.Json, null, ct).ConfigureAwait(false);
         }
 
         if (opts.Ip is not null)
         {
-            return await RunSingleAsync(opts.Ip, opts.Json, ct).ConfigureAwait(false);
+            if (opts.Report is not null)
+            {
+                return await RunProfileReportAsync(opts.Ip, opts.Report, ct).ConfigureAwait(false);
+            }
+
+            return await RunProfileAsync(opts.Ip, opts.Json, null, ct).ConfigureAwait(false);
         }
 
         if (opts.Json)
         {
             _error.WriteLine("[ERROR] --json requires an IP address.");
+            return ExitUsage;
+        }
+
+        if (opts.Report is not null)
+        {
+            _error.WriteLine("[ERROR] --report requires an IP address.");
             return ExitUsage;
         }
 
@@ -162,7 +216,11 @@ public sealed class CliApp
         string? ip = null;
         bool json = false, stdin = false, map = false, self = false;
         bool noColor = false, debug = false, version = false, help = false;
+        bool providers = false;
         string? file = null;
+        string? domain = null;
+        string? rdns = null;
+        string? report = null;
         double? timeout = null;
 
         for (int i = 0; i < args.Length; i++)
@@ -181,6 +239,7 @@ public sealed class CliApp
                 case "--no-color": noColor = true; break;
                 case "--debug": debug = true; break;
                 case "--file":
+                case "--batch":
                     if (i + 1 >= args.Length)
                     {
                         throw new UsageException("--file requires a PATH value.");
@@ -188,6 +247,31 @@ public sealed class CliApp
 
                     file = args[++i];
                     break;
+                case "--domain":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new UsageException("--domain requires a domain value.");
+                    }
+
+                    domain = args[++i];
+                    break;
+                case "--rdns":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new UsageException("--rdns requires an IP value.");
+                    }
+
+                    rdns = args[++i];
+                    break;
+                case "--report":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new UsageException("--report requires a format (txt, json, html).");
+                    }
+
+                    report = args[++i];
+                    break;
+                case "--providers": providers = true; break;
                 case "--timeout":
                     if (i + 1 >= args.Length)
                     {
@@ -221,12 +305,14 @@ public sealed class CliApp
             }
         }
 
-        return new Options(ip, json, file, stdin, map, self, noColor, debug, timeout, version, help);
+        return new Options(ip, json, file, stdin, map, self, noColor, debug, timeout, version, help,
+            domain, rdns, report, providers);
     }
 
     public static string HelpText() => string.Join("\n", new[]
     {
         "usage: iptracex.sh [-h] [--json] [--file PATH] [--stdin] [--map] [--self]",
+        "                   [--domain DOMAIN] [--rdns IP] [--report FORMAT] [--providers]",
         "                   [--no-color] [--debug] [--timeout TIMEOUT] [-v] [ip]",
         "",
         "IPTraceX -- Multi-provider IP intelligence and approximate geolocation CLI.",
@@ -239,9 +325,14 @@ public sealed class CliApp
         "  -h, --help         show this help message and exit",
         "  --json             Machine-readable JSON output.",
         "  --file PATH        Batch lookup, one IP per line.",
+        "  --batch PATH       Alias for --file.",
         "  --stdin            Read IPs from STDIN.",
         "  --map              Print Google Maps URL and exit.",
         "  --self             Detect this machine's public exit IP (HTTPS) and analyze it.",
+        "  --domain DOMAIN    Resolve a domain and analyze every public IP found.",
+        "  --rdns IP          Reverse-DNS lookup only.",
+        "  --report FORMAT    Save an investigation report (txt, json, html).",
+        "  --providers        List providers with health and capability notes.",
         "  --no-color         Disable ANSI colors.",
         "  --debug            Verbose technical details.",
         "  --timeout TIMEOUT  Provider timeout in seconds.",
@@ -253,6 +344,8 @@ public sealed class CliApp
         "  ./iptracex.sh --json 8.8.8.8",
         "  ./iptracex.sh --map 8.8.8.8",
         "  ./iptracex.sh --self",
+        "  ./iptracex.sh --domain example.com",
+        "  ./iptracex.sh --report html 8.8.8.8",
         "  ./iptracex.sh --file ips.txt",
         "  cat ips.txt | ./iptracex.sh --stdin",
     });
@@ -338,6 +431,206 @@ public sealed class CliApp
             _error.WriteLine(FriendlyError(ex));
             return null;
         }
+    }
+
+    private readonly List<ProviderOutcome> _lastOutcomes = [];
+
+    public async Task<int> RunProfileAsync(
+        string ipText, bool asJson, Action<string>? onStage, CancellationToken ct)
+    {
+        IntelligenceProfile profile;
+        try
+        {
+            profile = await _profiles.AnalyzeIpAsync(ipText, onStage, ct).ConfigureAwait(false);
+            _lastOutcomes.Clear();
+            _lastOutcomes.AddRange(profile.Providers);
+        }
+        catch (Exception ex)
+        {
+            if (_config.Debug)
+            {
+                _error.WriteLine(ex.ToString());
+                _error.WriteLine($"[debug] raw input: {Repr(ipText)}");
+            }
+
+            _error.WriteLine(FriendlyError(ex));
+            return ExitFor(ex);
+        }
+
+        if (asJson)
+        {
+            _output.WriteLine(GeoJson.ProfileToJsonString(profile, indented: true));
+        }
+        else
+        {
+            _output.WriteLine(Formatting.FormatProfile(profile, _palette));
+        }
+
+        return ExitOk;
+    }
+
+    public async Task<int> RunDomainAsync(string domain, bool asJson, CancellationToken ct)
+    {
+        (DomainEvidence resolution, List<IntelligenceProfile> profiles) result;
+        try
+        {
+            result = await _profiles.AnalyzeDomainAsync(domain, null, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            if (_config.Debug)
+            {
+                _error.WriteLine(ex.ToString());
+            }
+
+            _error.WriteLine(FriendlyError(ex));
+            return ExitFor(ex);
+        }
+
+        if (result.profiles.Count == 0)
+        {
+            _output.WriteLine($"[!] No public IPs resolved for {result.resolution.Domain}.");
+            return ExitGeneral;
+        }
+
+        _output.WriteLine("");
+        _output.WriteLine($"{_palette.TokenOk()} {_palette.Brand("DOMAIN")}");
+        _output.WriteLine($"    Domain       : {_palette.Data(result.resolution.Domain)}");
+        _output.WriteLine($"    A            : {_palette.Data(result.resolution.A.Length == 0 ? "none" : string.Join(", ", result.resolution.A))}");
+        _output.WriteLine($"    AAAA         : {_palette.Data(result.resolution.Aaaa.Length == 0 ? "none" : string.Join(", ", result.resolution.Aaaa))}");
+        _output.WriteLine("");
+        foreach (IntelligenceProfile profile in result.profiles)
+        {
+            _lastOutcomes.Clear();
+            _lastOutcomes.AddRange(profile.Providers);
+            if (asJson)
+            {
+                _output.WriteLine(GeoJson.ProfileToJsonString(profile, indented: true));
+            }
+            else
+            {
+                _output.WriteLine(Formatting.FormatProfile(profile, _palette));
+            }
+        }
+
+        return ExitOk;
+    }
+
+    public async Task<int> RunDomainReportAsync(string domain, string format, CancellationToken ct)
+    {
+        (DomainEvidence resolution, List<IntelligenceProfile> profiles) result;
+        try
+        {
+            result = await _profiles.AnalyzeDomainAsync(domain, null, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            if (_config.Debug)
+            {
+                _error.WriteLine(ex.ToString());
+            }
+
+            _error.WriteLine(FriendlyError(ex));
+            return ExitFor(ex);
+        }
+
+        if (result.profiles.Count == 0)
+        {
+            _output.WriteLine($"[!] No public IPs resolved for {result.resolution.Domain}.");
+            return ExitGeneral;
+        }
+
+        foreach (IntelligenceProfile profile in result.profiles)
+        {
+            try
+            {
+                string path = Infrastructure.ReportService.SaveProfile(profile, format, _config.ProjectRoot);
+                _output.WriteLine($"[+] Report saved to {path}");
+            }
+            catch (TraceXException ex)
+            {
+                _error.WriteLine(FriendlyError(ex));
+                return ex.ExitCode;
+            }
+        }
+
+        return ExitOk;
+    }
+
+    public async Task<int> RunProfileReportAsync(string ipText, string format, CancellationToken ct)
+    {
+        IntelligenceProfile profile;
+        try
+        {
+            profile = await _profiles.AnalyzeIpAsync(ipText, null, ct).ConfigureAwait(false);
+            _lastOutcomes.Clear();
+            _lastOutcomes.AddRange(profile.Providers);
+        }
+        catch (Exception ex)
+        {
+            if (_config.Debug)
+            {
+                _error.WriteLine(ex.ToString());
+            }
+
+            _error.WriteLine(FriendlyError(ex));
+            return ExitFor(ex);
+        }
+
+        try
+        {
+            string path = Infrastructure.ReportService.SaveProfile(profile, format, _config.ProjectRoot);
+            _output.WriteLine($"[+] Report saved to {path}");
+            return ExitOk;
+        }
+        catch (TraceXException ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ex.ExitCode;
+        }
+    }
+
+    public async Task<int> RunRdnsAsync(string ipText, CancellationToken ct)
+    {
+        IntelligenceProfile profile;
+        try
+        {
+            profile = await _profiles.AnalyzeIpAsync(ipText, null, ct).ConfigureAwait(false);
+            _lastOutcomes.Clear();
+            _lastOutcomes.AddRange(profile.Providers);
+        }
+        catch (Exception ex)
+        {
+            if (_config.Debug)
+            {
+                _error.WriteLine(ex.ToString());
+            }
+
+            _error.WriteLine(FriendlyError(ex));
+            return ExitFor(ex);
+        }
+
+        _output.WriteLine("");
+        _output.WriteLine($"{_palette.TokenOk()} {_palette.Brand("REVERSE DNS")}");
+        _output.WriteLine($"    IP           : {_palette.Data(profile.Geo.Ip)}");
+        _output.WriteLine($"    PTR          : {_palette.Data(profile.Dns.PtrHostnames.Length == 0 ? "none observed" : string.Join(", ", profile.Dns.PtrHostnames))}");
+        _output.WriteLine($"    Confidence   : {_palette.Data(profile.Dns.Confidence)}");
+        _output.WriteLine($"    Sources      : {_palette.Data(profile.Dns.Sources.Length == 0 ? "none" : string.Join(", ", profile.Dns.Sources))}");
+        _output.WriteLine("");
+        return ExitOk;
+    }
+
+    public int ShowProviders()
+    {
+        var health = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (ProviderOutcome outcome in _lastOutcomes)
+        {
+            health[outcome.ProviderId] = outcome.Status == "success" ? "OK" : "ERROR";
+        }
+
+        _output.WriteLine(Formatting.FormatProviders(_palette, Infrastructure.ProviderCatalog.All, health));
+        _output.WriteLine("[::] Health reflects this process; run a lookup to populate it.");
+        return ExitOk;
     }
 
     public async Task<int> RunSingleAsync(string ipText, bool asJson, CancellationToken ct)
@@ -543,33 +836,15 @@ public sealed class CliApp
             _output.WriteLine(Formatting.Startup(_palette, AppInfo.Version));
         }
 
-        GeoResult? current = null;
-
-        void Progress(string stage)
-        {
-            string? line = stage switch
-            {
-                "validating" => Formatting.StageLine(_palette, "validating"),
-                _ when stage.StartsWith("querying:", StringComparison.Ordinal)
-                    => $"{_palette.TokenInfo()} Querying {stage["querying:".Length..]}...",
-                _ when stage.StartsWith("cached:", StringComparison.Ordinal)
-                    => $"{_palette.TokenInfo()} Loading cached result ({stage["cached:".Length..]})...",
-                _ => Formatting.StageLine(_palette, stage),
-            };
-            if (line is not null)
-            {
-                _output.WriteLine(line);
-            }
-        }
-
         while (true)
         {
-            string? raw;
+            _output.WriteLine(Formatting.MainMenu(_palette));
+            string? choice;
             try
             {
-                _output.Write(Formatting.InputPrompt(_palette));
+                _output.Write($"{_palette.TokenIn()} ");
                 _output.Flush();
-                raw = await _input.ReadLineAsync(ct).ConfigureAwait(false);
+                choice = (await _input.ReadLineAsync(ct).ConfigureAwait(false))?.Trim();
             }
             catch (Exception ex) when (ex is IOException || ex is OperationCanceledException
                 || ex is InvalidOperationException || ex is ObjectDisposedException)
@@ -578,129 +853,330 @@ public sealed class CliApp
                 return ExitOk;
             }
 
-            if (raw is null)
+            if (choice is null)
             {
                 _output.WriteLine("\nBye.");
                 return ExitOk;
             }
 
-            raw = raw.Trim();
-            if (raw.Length == 0)
+            switch (choice)
             {
-                _error.WriteLine("[ERROR] Empty IP address.");
-                continue;
-            }
-
-            try
-            {
-                current = await _engine.AnalyzeAsync(raw, Progress, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                if (_config.Debug)
-                {
-                    _error.WriteLine(ex.ToString());
-                    _error.WriteLine($"[debug] raw input: {Repr(raw)}");
-                }
-
-                _error.WriteLine(FriendlyError(ex));
-                continue;
-            }
-
-            _output.WriteLine(Formatting.FormatReport(current, _palette));
-            while (true)
-            {
-                bool mapsOk = current.GoogleMapsUrl is not null
-                    || Maps.BuildMapsUrl(current.Geolocation.Latitude, current.Geolocation.Longitude) is not null;
-                _output.WriteLine(Formatting.InteractiveMenu(_palette, mapsOk));
-                string? choice;
-                try
-                {
-                    _output.Write($"{_palette.TokenIn()} ");
-                    _output.Flush();
-                    choice = (await _input.ReadLineAsync(ct).ConfigureAwait(false))?.Trim();
-                }
-                catch (Exception ex) when (ex is IOException || ex is OperationCanceledException
-                    || ex is InvalidOperationException || ex is ObjectDisposedException)
-                {
-                    _output.WriteLine("\nBye.");
-                    return ExitOk;
-                }
-
-                if (choice is null)
-                {
-                    _output.WriteLine("\nBye.");
-                    return ExitOk;
-                }
-
-                if (choice is "1" or "01")
-                {
-                    break; // another IP
-                }
-
-                if (choice is "2" or "02")
-                {
-                    string? url = current.GoogleMapsUrl
-                        ?? Maps.BuildMapsUrl(current.Geolocation.Latitude, current.Geolocation.Longitude);
-                    if (url is null)
+                case "1":
+                case "01":
+                    if (await AnalyzeIpFlowAsync(ct).ConfigureAwait(false))
                     {
-                        _output.WriteLine("[!] Google Maps unavailable for this result.");
-                        continue;
+                        return ExitOk;
                     }
 
-                    _output.WriteLine("[+] GOOGLE MAPS\n\n    " + url);
-                    var (opened, message) = Maps.OpenInBrowser(url);
-                    if (opened)
-                    {
-                        _output.WriteLine("[+] Opened in browser.");
-                    }
-                    else
-                    {
-                        _output.WriteLine($"[!] {message}");
-                        _output.WriteLine("[+] Google Maps:\n    " + url);
-                    }
-
-                    continue;
-                }
-
-                if (choice is "3" or "03")
-                {
-                    try
-                    {
-                        string path = ExportJson(current);
-                        _output.WriteLine($"[+] JSON exported to {path}");
-                    }
-                    catch (TraceXException ex)
-                    {
-                        _error.WriteLine(FriendlyError(ex));
-                    }
-
-                    continue;
-                }
-
-                if (choice is "4" or "04")
-                {
-                    try
-                    {
-                        string path = SaveReport(current);
-                        _output.WriteLine($"[+] Report saved to {path}");
-                    }
-                    catch (TraceXException ex)
-                    {
-                        _error.WriteLine(FriendlyError(ex));
-                    }
-
-                    continue;
-                }
-
-                if (choice is "0" or "00")
-                {
+                    break;
+                case "2":
+                case "02":
+                    await AnalyzeDomainFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "3":
+                case "03":
+                    await SelfFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "4":
+                case "04":
+                    await ReverseDnsFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "5":
+                case "05":
+                    ShowProviders();
+                    break;
+                case "6":
+                case "06":
+                    await BatchFileFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "7":
+                case "07":
+                    await InvestigationReportFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "8":
+                case "08":
+                    ShowConfiguration();
+                    break;
+                case "0":
+                case "00":
                     _output.WriteLine("Bye.");
                     return ExitOk;
-                }
-
-                _output.WriteLine("[?] Unknown option. Choose 01/02/03/04/00.");
+                default:
+                    _output.WriteLine("[?] Unknown option. Choose 01-08 or 00.");
+                    break;
             }
         }
     }
+
+    private async Task<string?> PromptAsync(string prompt, CancellationToken ct)
+    {
+        try
+        {
+            _output.Write(prompt);
+            _output.Flush();
+            return (await _input.ReadLineAsync(ct).ConfigureAwait(false))?.Trim();
+        }
+        catch (Exception ex) when (ex is IOException || ex is OperationCanceledException
+            || ex is InvalidOperationException || ex is ObjectDisposedException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool> AnalyzeIpFlowAsync(CancellationToken ct)
+    {
+        string? raw = await PromptAsync(Formatting.InputPrompt(_palette), ct).ConfigureAwait(false);
+        if (raw is null)
+        {
+            _output.WriteLine("\nBye.");
+            return true;
+        }
+
+        if (raw.Length == 0)
+        {
+            _error.WriteLine("[ERROR] Empty IP address.");
+            return false;
+        }
+
+        IntelligenceProfile? profile = await AnalyzeProfileAsync(raw, null, ct)
+            .ConfigureAwait(false);
+        if (profile is null)
+        {
+            return false;
+        }
+
+        _output.WriteLine(Formatting.FormatProfile(profile, _palette));
+        return await PostLookupMenuAsync(profile, ct).ConfigureAwait(false);
+    }
+
+    private async Task<IntelligenceProfile?> AnalyzeProfileAsync(
+        string raw, Action<string>? onStage, CancellationToken ct)
+    {
+        try
+        {
+            return await _profiles.AnalyzeIpAsync(raw, onStage, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            if (_config.Debug)
+            {
+                _error.WriteLine(ex.ToString());
+                _error.WriteLine($"[debug] raw input: {Repr(raw)}");
+            }
+
+            _error.WriteLine(FriendlyError(ex));
+            return null;
+        }
+    }
+
+    private async Task AnalyzeDomainFlowAsync(CancellationToken ct)
+    {
+        string? domain = await PromptAsync(
+            $"{_palette.TokenAsk()} Enter domain:\n{_palette.TokenIn()} ", ct).ConfigureAwait(false);
+        if (domain is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        if (domain.Length == 0)
+        {
+            _error.WriteLine("[ERROR] Empty domain.");
+            return;
+        }
+
+        await RunDomainAsync(domain, false, ct).ConfigureAwait(false);
+    }
+
+    private async Task SelfFlowAsync(CancellationToken ct)
+    {
+        string? target = await ResolveSelfAsync(ct).ConfigureAwait(false);
+        if (target is null)
+        {
+            return;
+        }
+
+        _output.WriteLine(
+            $"{_palette.TokenInfo()} Note: result reflects your public exit IP (VPN/proxy aware).");
+        IntelligenceProfile? profile = await AnalyzeProfileAsync(target, null, ct)
+            .ConfigureAwait(false);
+        if (profile is not null)
+        {
+            _output.WriteLine(Formatting.FormatProfile(profile, _palette));
+        }
+    }
+
+    private async Task ReverseDnsFlowAsync(CancellationToken ct)
+    {
+        string? raw = await PromptAsync(Formatting.InputPrompt(_palette), ct).ConfigureAwait(false);
+        if (raw is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        if (raw.Length == 0)
+        {
+            _error.WriteLine("[ERROR] Empty IP address.");
+            return;
+        }
+
+        await RunRdnsAsync(raw, ct).ConfigureAwait(false);
+    }
+
+    private async Task BatchFileFlowAsync(CancellationToken ct)
+    {
+        string? path = await PromptAsync(
+            $"{_palette.TokenAsk()} Enter file path:\n{_palette.TokenIn()} ", ct).ConfigureAwait(false);
+        if (path is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        List<string> lines;
+        try
+        {
+            lines = ReadLinesFromFile(path);
+        }
+        catch (TraceXException ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return;
+        }
+
+        await RunBatchAsync(lines, ct).ConfigureAwait(false);
+    }
+
+    private async Task InvestigationReportFlowAsync(CancellationToken ct)
+    {
+        string? raw = await PromptAsync(Formatting.InputPrompt(_palette), ct).ConfigureAwait(false);
+        if (raw is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        if (raw.Length == 0)
+        {
+            _error.WriteLine("[ERROR] Empty IP address.");
+            return;
+        }
+
+        string? format = await PromptAsync(
+            $"{_palette.TokenAsk()} Format (txt/json/html):\n{_palette.TokenIn()} ", ct)
+            .ConfigureAwait(false);
+        if (format is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        await RunProfileReportAsync(raw, format, ct).ConfigureAwait(false);
+    }
+
+    private void ShowConfiguration()
+    {
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        _output.WriteLine("");
+        _output.WriteLine($"{_palette.TokenOk()} {_palette.Brand("CONFIGURATION")}");
+        _output.WriteLine($"    Providers    : {_palette.Data(string.Join(",", _config.Providers))}");
+        _output.WriteLine($"    Intel        : {_palette.Data(string.Join(",", _config.IntelProviders))}");
+        _output.WriteLine($"    Timeout      : {_palette.Data(_config.TimeoutSeconds.ToString(invariant) + "s")}");
+        _output.WriteLine($"    Concurrency  : {_palette.Data(_config.MaxConcurrency.ToString(invariant))}");
+        _output.WriteLine($"    Cache TTL    : {_palette.Data(_config.CacheTtlSeconds.ToString(invariant) + "s")}");
+        _output.WriteLine($"    IPINFO_TOKEN : {_palette.Data(_config.IpInfoToken.Length == 0 ? "not set" : "set")}");
+        _output.WriteLine($"    ABUSEIPDB    : {_palette.Data(_config.AbuseIpDbKey.Length == 0 ? "not set" : "set")}");
+        _output.WriteLine("");
+    }
+
+    private async Task<bool> PostLookupMenuAsync(IntelligenceProfile profile, CancellationToken ct)
+    {
+        GeoResult current = profile.Geo;
+        while (true)
+        {
+            bool mapsOk = current.GoogleMapsUrl is not null
+                || Maps.BuildMapsUrl(current.Geolocation.Latitude, current.Geolocation.Longitude) is not null;
+            _output.WriteLine(Formatting.InteractiveMenu(_palette, mapsOk));
+            string? choice;
+            try
+            {
+                _output.Write($"{_palette.TokenIn()} ");
+                _output.Flush();
+                choice = (await _input.ReadLineAsync(ct).ConfigureAwait(false))?.Trim();
+            }
+            catch (Exception ex) when (ex is IOException || ex is OperationCanceledException
+                || ex is InvalidOperationException || ex is ObjectDisposedException)
+            {
+                _output.WriteLine("\nBye.");
+                return true;
+            }
+
+            if (choice is null)
+            {
+                _output.WriteLine("\nBye.");
+                return true;
+            }
+
+            if (choice is "1" or "01")
+            {
+                return false; // back to main menu
+            }
+
+            if (choice is "2" or "02")
+            {
+                string? url = current.GoogleMapsUrl
+                    ?? Maps.BuildMapsUrl(current.Geolocation.Latitude, current.Geolocation.Longitude);
+                if (url is null)
+                {
+                    _output.WriteLine("[!] Google Maps unavailable for this result.");
+                    continue;
+                }
+
+                _output.WriteLine("[+] GOOGLE MAPS\n\n    " + url);
+                var (opened, message) = Maps.OpenInBrowser(url);
+                if (opened)
+                {
+                    _output.WriteLine("[+] Opened in browser.");
+                }
+                else
+                {
+                    _output.WriteLine($"[!] {message}");
+                    _output.WriteLine("[+] Google Maps:\n    " + url);
+                }
+
+                continue;
+            }
+
+            if (choice is "3" or "03")
+            {
+                _output.WriteLine(GeoJson.ProfileToJsonString(profile, indented: true));
+                continue;
+            }
+
+            if (choice is "4" or "04")
+            {
+                try
+                {
+                    string path = Infrastructure.ReportService.SaveProfile(profile, "txt", _config.ProjectRoot);
+                    _output.WriteLine($"[+] Report saved to {path}");
+                }
+                catch (TraceXException ex)
+                {
+                    _error.WriteLine(FriendlyError(ex));
+                }
+
+                continue;
+            }
+
+            if (choice is "0" or "00")
+            {
+                _output.WriteLine("Bye.");
+                return true;
+            }
+
+            _output.WriteLine("[?] Unknown option. Choose 01/02/03/04/00.");
+        }
+    }
 }
+

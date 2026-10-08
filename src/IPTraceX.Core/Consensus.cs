@@ -26,7 +26,12 @@ public static class Consensus
         new(@"\D",
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    public sealed record ConsensusOutcome(GeoResult Final, int Agreeing, string Confidence, bool Disputed);
+    public sealed record ConsensusOutcome(
+        GeoResult Final,
+        int Agreeing,
+        string Confidence,
+        bool Disputed,
+        IReadOnlyDictionary<string, (int Agreeing, int Total)> FieldVotes);
 
     private static string? NormText(string? value)
     {
@@ -313,6 +318,16 @@ public static class Consensus
             && Key(r.Geolocation.City) == Key(city));
         bool disputed = total > 1 && agreeing < total;
 
+        // Per-field votes for transparent field-level confidence.
+        var fieldVotes = new Dictionary<string, (int Agreeing, int Total)>(StringComparer.Ordinal)
+        {
+            ["country_code"] = (CountMatch(results.Select(r => r.Geolocation.CountryCode), winnerCode), total),
+            ["region"] = (CountMatch(results.Select(r => r.Geolocation.Region), region), total),
+            ["city"] = (CountMatch(results.Select(r => r.Geolocation.City), city), total),
+            ["asn"] = (results.Count(r => AsnDigits(r.Network.Asn) == AsnDigits(asn)
+                && AsnDigits(r.Network.Asn) is not null), total),
+        };
+
         string confidence;
         if (total == 0 || agreeing == 0)
         {
@@ -355,6 +370,12 @@ public static class Consensus
         final.Network.Asn = asn;
         final.Network.AsName = asName;
         final.Network.Hostname = hostname;
-        return new ConsensusOutcome(final, agreeing, confidence, disputed);
+        return new ConsensusOutcome(final, agreeing, confidence, disputed, fieldVotes);
+    }
+
+    private static int CountMatch(IEnumerable<string?> values, string? winner)
+    {
+        string? winnerKey = Key(winner);
+        return values.Count(v => Key(v) == winnerKey);
     }
 }

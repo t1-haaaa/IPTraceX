@@ -1,4 +1,8 @@
 
+[+] TARGET
+    Target       : 8.8.8.8
+    Type         : IPv4
+
 [+] IP INFORMATION
     Address      : 8.8.8.8
     Version      : IPv4
@@ -42,4 +46,32 @@
     IP geolocation is approximate.
     It does not identify an exact physical address,
     person, or real-time device location.
+
+[+] ASN INTELLIGENCE
+    ASN          : AS15169
+    Organization : Google LLC
+    Network Name : GOGL
+    Prefix       : 8.8.8.0/24
+    Registry     : Unknown
+    Country      : US
+
+[+] DNS INTELLIGENCE
+    PTR          : dns.google, google.com
+    Confidence   : HIGH
+
+[+] ANONYMITY
+    Tor          : NOT DETECTED (HIGH)
+    VPN          : UNKNOWN (UNKNOWN)
+    Proxy        : UNKNOWN (UNKNOWN)
+    Hosting      : NOT DETECTED (LOW)
+
+[+] RISK ASSESSMENT
+    Score        : unknown
+    Level        : UNKNOWN
+
+[+] FIELD CONFIDENCE
+    country      : United States (MEDIUM, 2/3)
+    region       : California (MEDIUM, 2/3)
+    city         : Mountain View (MEDIUM, 2/3)
+    asn          : AS15169 (MEDIUM, 2/3)
 

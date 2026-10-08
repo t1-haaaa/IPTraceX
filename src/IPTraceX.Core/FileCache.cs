@@ -108,4 +108,72 @@ public static class FileCache
         {
         }
     }
+
+    /// <summary>Raw-text cache sibling (exit lists, range feeds). Same TTL rules.</summary>
+    public static string? GetText(string key, int ttlSeconds, string ns = "")
+    {
+        if (ttlSeconds <= 0)
+        {
+            return null;
+        }
+
+        string path = PathFor(key, "text:" + ns);
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+            if (lines.Length < 2
+                || !double.TryParse(lines[0],
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out double saved))
+            {
+                return null;
+            }
+
+            double now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+            if (now - saved > ttlSeconds)
+            {
+                return null;
+            }
+
+            return string.Join("\n", lines[1..]);
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException
+            || ex is FormatException)
+        {
+            return null;
+        }
+    }
+
+    public static void PutText(string key, string text, int ttlSeconds, string ns = "")
+    {
+        if (ttlSeconds <= 0)
+        {
+            return;
+        }
+
+        string lowered = text.ToLowerInvariant();
+        if (lowered.Contains("api_key") || lowered.Contains("apikey") || lowered.Contains("bearer"))
+        {
+            return;
+        }
+
+        string path = PathFor(key, "text:" + ns);
+        try
+        {
+            double now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+            File.WriteAllText(
+                path,
+                now.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n" + text,
+                Encoding.UTF8);
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+        {
+        }
+    }
 }
