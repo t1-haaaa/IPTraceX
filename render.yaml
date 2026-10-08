@@ -1,0 +1,39 @@
+# Render Blueprint for IPTraceX monitoring (dashboard + audit API + Postgres).
+# Deploy: connect the repo in Render → New → Blueprint → select render.yaml.
+# Secrets (sync: false) are entered in the Render dashboard, never committed.
+#
+# No worker service: audit shipping runs inside each CLI process (bounded
+# async queue); the web service has no background jobs to extract.
+# No cron service: no scheduled tasks exist (CLI log retention is local).
+
+services:
+  - type: web
+    name: iptracex-dashboard
+    runtime: node
+    rootDir: apps/dashboard
+    buildCommand: npm ci && npm run build
+    preDeployCommand: npm run migrate
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: iptracex-db
+          property: connectionString
+      - key: IPTRACEX_AUDIT_INGEST_SECRET
+        sync: false
+      - key: IPTRACEX_DASHBOARD_SESSION_SECRET
+        sync: false
+      - key: IPTRACEX_DASHBOARD_USERS
+        sync: false
+      # Per-user dashboard passwords: add one env var per user in the
+      # Render dashboard, e.g. IPTRACEX_DASHBOARD_PASSWORD_ALICE (sync: false).
+
+databases:
+  - name: iptracex-db
+    databaseName: iptracex
+    user: iptracex
+    plan: starter

@@ -23,6 +23,11 @@ Format follows Keep a Changelog; versions follow SemVer.
   dashboard); Vercel cloud deploy itself left to release step.
 - fix: launcher header test tracks `APP_VERSION` instead of a frozen
   string; audit file reader shares access with the live writer.
+- deploy: Render Blueprint (`render.yaml` — dashboard web service +
+  PostgreSQL, `DATABASE_URL` injection, idempotent `preDeployCommand`
+  migration, `/api/health` checks, secrets via `sync: false`);
+  no worker/cron (none required — documented); production CLI wiring
+  via `IPTRACEX_AUDIT_ENDPOINT`/`IPTRACEX_AUDIT_SECRET`.
 
 ## 2.2.0 — 2026-10-08
 

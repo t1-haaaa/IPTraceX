@@ -52,6 +52,11 @@ timeout + fail-open retry. Queue-full drops the remote copy but keeps
 it locally and records `AUDIT_QUEUE_FULL`. If the backend is down,
 `IP analysis: SUCCESS` while `Remote audit: OFFLINE` — results first.
 
+Production (Render): point `IPTRACEX_AUDIT_ENDPOINT` at the Render web
+service URL and `IPTRACEX_AUDIT_SECRET` at the ingest secret; both are
+plain env vars, never committed. See `render.yaml` and
+`apps/dashboard/README.md`.
+
 ## CLI viewer
 
 ```bash
