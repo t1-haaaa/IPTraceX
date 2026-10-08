@@ -5,6 +5,8 @@ Format follows Keep a Changelog; versions follow SemVer.
 
 ## Unreleased
 
+## 1.1.0 — 2026-10-08
+
 - feat: IP Intelligence 2.0 — full profiles (ASN, DNS, anonymity, risk),
   plugin provider framework (10 adapters: 3 geo, RIPEstat, 2× DoH, system
   DNS, Tor exits, cloud ranges, optional AbuseIPDB), bounded-concurrency
