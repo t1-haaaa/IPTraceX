@@ -5,8 +5,10 @@ export async function GET() {
   let database: "ok" | "degraded" | "unconfigured" = "unconfigured";
   if (process.env.DATABASE_URL) {
     try {
-      const { Pool } = await import("pg");
-      const pool = new Pool({
+      const { default: pgMod } = (await import("pg")) as unknown as {
+        default: { Pool: new (cfg: unknown) => { query: (q: string) => Promise<unknown>; end: () => Promise<void> } };
+      };
+      const pool = new pgMod.Pool({
         connectionString: process.env.DATABASE_URL,
         max: 1,
         connectionTimeoutMillis: 3000,

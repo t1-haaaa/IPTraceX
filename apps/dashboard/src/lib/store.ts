@@ -103,9 +103,10 @@ async function pg(): Promise<typeof pgPool> {
   pgTried = true;
   if (!process.env.DATABASE_URL) return null;
   try {
-    const mod = await import("pg");
-    const Pool = (mod as { Pool: new (cfg: unknown) => typeof pgPool }).Pool;
-    pgPool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
+    const { default: pgMod } = await import("pg") as unknown as {
+      default: { Pool: new (cfg: unknown) => NonNullable<typeof pgPool> };
+    };
+    pgPool = new pgMod.Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
     return pgPool;
   } catch {
     return null;

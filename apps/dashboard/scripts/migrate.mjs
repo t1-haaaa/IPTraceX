@@ -9,9 +9,9 @@ if (!url) {
   console.error("DATABASE_URL is not set; skipping migration.");
   process.exit(2);
 }
-const { Pool } = await import("pg");
+const { default: pg } = await import("pg");
 const sql = readFileSync(join(root, "schema.sql"), "utf8");
-const pool = new Pool({ connectionString: url });
+const pool = new pg.Pool({ connectionString: url });
 try {
   await pool.query(sql);
   console.log("migration applied");
