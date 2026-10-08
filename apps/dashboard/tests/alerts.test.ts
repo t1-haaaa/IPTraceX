@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { tmpdir } from "os";
+import { join } from "path";
 import { saveAlert, listAlerts, setAlertStatus } from "../src/lib/store";
 
 describe("alert lifecycle", () => {
   it("creates, acknowledges, and resolves with audit", async () => {
-    process.env.AUDIT_DATA_DIR = `audit-test-${Date.now()}`;
+    process.env.AUDIT_DATA_DIR = join(tmpdir(), `audit-test-${Date.now()}`);
     await saveAlert({
       alert_id: "ALT-TEST-1",
       timestamp: new Date().toISOString(),
