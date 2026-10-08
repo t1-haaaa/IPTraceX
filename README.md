@@ -236,6 +236,22 @@ block intelligence results. See `docs/audit-logging.md`,
 `docs/event-schema.md`, `docs/security-monitoring.md`,
 `docs/vercel-dashboard.md`.
 
+## Production Deployment (Render)
+
+Render is the official production platform: `render.yaml` Blueprint
+(dashboard web service + PostgreSQL, `DATABASE_URL` injection,
+idempotent `preDeployCommand` migration, `/api/health` checks,
+`sync: false` secrets). Point CLI clients at the service URL:
+
+```bash
+IPTRACEX_AUDIT_ENABLED=1
+IPTRACEX_AUDIT_ENDPOINT=https://<service>.onrender.com
+IPTRACEX_AUDIT_SECRET=<ingest secret>
+```
+
+Full procedure, verification, troubleshooting, and rollback:
+`docs/render-runbook.md`.
+
 ## Evidence & Confidence
 
 Every fact shows its providers: an evidence matrix (SUPPORT / CONFLICT /
