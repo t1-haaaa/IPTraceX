@@ -69,7 +69,7 @@ public static class ReportService
         return resolved;
     }
 
-    internal static string ToText(IntelligenceProfile profile)
+    public static string ToText(IntelligenceProfile profile)
     {
         var g = profile.Geo.Geolocation;
         var n = profile.Geo.Network;
@@ -227,10 +227,19 @@ public static class ReportService
     }
 
     private static string Text(object? value)
-        => value switch
+    {
+        string text = value switch
         {
             null => "Unknown",
             double d => d.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            _ => value.ToString()?.Trim() is { Length: > 0 } text ? text : "Unknown",
+            _ => value.ToString()?.Trim() ?? "",
         };
+        if (text.Length == 0)
+        {
+            return "Unknown";
+        }
+
+        // Neutralize newline injection from untrusted provider data.
+        return text.Replace('\r', ' ').Replace('\n', ' ');
+    }
 }

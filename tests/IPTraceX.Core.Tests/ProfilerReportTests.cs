@@ -41,6 +41,16 @@ public sealed class ProfilerReportTests
     }
 
     [Fact]
+    public void ReportTextNeutralizesNewlines()
+    {
+        var profile = Sample.Profile();
+        profile.Geo.Geolocation.Country = "Algeria\nINJECTED: yes";
+        string text = ReportService.ToText(profile);
+        Assert.DoesNotContain("\nINJECTED", text);
+        Assert.Contains("Algeria INJECTED: yes", text);
+    }
+
+    [Fact]
     public void SafeNames()
     {
         Assert.Equal("8.8.8.8", ReportService.SafeName("8.8.8.8"));
