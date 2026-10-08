@@ -40,7 +40,7 @@ lines are skipped by readers, never fatal.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `IPTRACEX_AUDIT_ENDPOINT` | empty (disabled) | Vercel dashboard base URL |
+| `IPTRACEX_AUDIT_ENDPOINT` | empty (disabled) | Dashboard base URL (Render service URL) |
 | `IPTRACEX_AUDIT_SECRET` | empty | Bearer ingest secret (env only) |
 | `IPTRACEX_AUDIT_PROJECT` / `IPTRACEX_AUDIT_INSTANCE` | empty | optional agent labels |
 | `IPTRACEX_AUDIT_BATCH_SIZE` | `50` | events per POST (1–500) |

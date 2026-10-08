@@ -231,7 +231,7 @@ See `docs/investigations.md`.
 ```
 
 Every operation emits structured audit events (local daily JSONL +
-optional async shipping to the Vercel dashboard). Remote outages never
+optional async shipping to the monitoring dashboard). Remote outages never
 block intelligence results. See `docs/audit-logging.md`,
 `docs/event-schema.md`, `docs/security-monitoring.md`,
 `docs/vercel-dashboard.md`.

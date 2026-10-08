@@ -1,4 +1,7 @@
-# Vercel Dashboard
+# IPTraceX Dashboard
+
+Monitoring UI in `apps/dashboard` (Next.js 14 + TypeScript). It is
+observability for the CLI, not a replacement.
 
 Monitoring UI in `apps/dashboard` (Next.js 14 + TypeScript). It is
 observability for the CLI, not a replacement.

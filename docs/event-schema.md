@@ -1,6 +1,6 @@
 # Event Schema
 
-Shared contract between the C# emitter (`AuditJson`) and the Vercel
+Shared contract between the C# emitter (`AuditJson`) and the dashboard
 ingest API (`apps/dashboard/src/lib/events.ts`). Both sides validate
 it; keep them in sync.
 

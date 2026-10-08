@@ -1,4 +1,9 @@
-# Vercel Dashboard (repo overview)
+# IPTraceX Dashboard (repo overview)
+
+The monitoring dashboard lives in `apps/dashboard` with its own
+README (Render deploy, env, migrations). Production target is Render
+(see `render.yaml` and `docs/render-runbook.md`); the app remains
+Vercel-compatible as an alternative.
 
 The monitoring dashboard lives in `apps/dashboard` with its own
 README (deploy, env, migrations). Summary for IPTraceX operators:
