@@ -28,7 +28,11 @@ function users(): Map<string, { hash: string; salt: string; role: Role }> {
   const list = (process.env.IPTRACEX_DASHBOARD_USERS || "").split(",").filter(Boolean);
   for (const entry of list) {
     const [name, role] = entry.split(":");
-    const password = process.env[`IPTRACEX_DASHBOARD_PASSWORD_${name.trim().toUpperCase()}`];
+    const clean = name.trim();
+    // Env-var names cannot reliably contain '-', accept '_' as well.
+    const password =
+      process.env[`IPTRACEX_DASHBOARD_PASSWORD_${clean.toUpperCase()}`] ??
+      process.env[`IPTRACEX_DASHBOARD_PASSWORD_${clean.toUpperCase().replace(/-/g, "_")}`];
     if (!name || !password) continue;
     const salt = process.env.IPTRACEX_DASHBOARD_SESSION_SECRET || "dev-salt";
     map.set(name.trim(), {
