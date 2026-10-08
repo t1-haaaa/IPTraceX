@@ -247,6 +247,7 @@ internal static class Sample
         TimeoutSeconds = 5,
         CacheTtlSeconds = 0,
         ProjectRoot = Path.GetTempPath(),
+        AuditEnabled = false,
     };
 
     public static CliApp App(
@@ -259,7 +260,8 @@ internal static class Sample
         StringWriter? errors = null,
         IProfileEngine? profiles = null,
         Exception? profileError = null,
-        IEmailProfileEngine? emailProfiles = null)
+        IEmailProfileEngine? emailProfiles = null,
+        IAuditLogger? audit = null)
     {
         output ??= new StringWriter();
         errors ??= new StringWriter();
@@ -274,6 +276,7 @@ internal static class Sample
             detectSelf,
             profiles ?? new FakeProfileEngine(error: profileError),
             null,
-            emailProfiles ?? new FakeEmailEngine());
+            emailProfiles ?? new FakeEmailEngine(),
+            audit ?? NullAuditLogger.Instance);
     }
 }

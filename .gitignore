@@ -43,3 +43,10 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
+
+# Dashboard (Vercel app)
+apps/dashboard/node_modules/
+apps/dashboard/.next/
+apps/dashboard/.audit-data/
+apps/dashboard/out/

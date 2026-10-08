@@ -23,6 +23,17 @@ public sealed class AppConfig
     public string HibpApiKey { get; set; } = "";
     public string GitHubToken { get; set; } = "";
     public string EmailRiskWeights { get; set; } = "";
+    public bool AuditEnabled { get; set; } = true;
+    public string AuditEndpoint { get; set; } = "";
+    public string AuditSecret { get; set; } = "";
+    public string AuditProject { get; set; } = "";
+    public string AuditInstance { get; set; } = "";
+    public int AuditBatchSize { get; set; } = 50;
+    public int AuditFlushSeconds { get; set; } = 5;
+    public int AuditTimeoutSeconds { get; set; } = 10;
+    public string LogDir { get; set; } = "";
+    public long LogMaxMb { get; set; } = 100;
+    public int LogRetentionDays { get; set; } = 30;
 
     public static readonly string[] DefaultProviders = ["ipwho.is", "ipapi.co", "ipinfo.io"];
 }

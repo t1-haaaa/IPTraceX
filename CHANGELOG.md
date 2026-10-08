@@ -3,6 +3,27 @@
 All notable changes to IPTraceX are documented here.
 Format follows Keep a Changelog; versions follow SemVer.
 
+## 2.3.0 — 2026-10-08
+
+- feat: central audit logging — structured `AuditEvent` taxonomy
+  (60+ types, 7 severities), session/correlation/investigation IDs,
+  per-lookup provider + consensus/confidence/risk telemetry, local
+  daily JSONL (`IPTRACEX_LOG_DIR/MAX_MB/RETENTION_DAYS`, secret
+  redaction, corruption-tolerant reads), bounded async remote shipping
+  (`IPTRACEX_AUDIT_ENDPOINT/SECRET`, batching, timeout, fail-open
+  retry, queue-full accounting), `--logs` viewer (`--today/--errors/
+  --security/--investigation/--provider/--last/--json`) and
+  `--security-status` summary.
+- feat: Vercel monitoring dashboard (`apps/dashboard`, Next.js+TS) —
+  authenticated `POST /api/v1/events` ingest (Bearer, validation,
+  rate limits), Postgres-or-file store with migrations, overview/
+  live-events/event-detail/security/investigations/providers/reports/
+  search/system/settings pages, role-based auth (ADMIN/ANALYST/VIEWER),
+  3s polling + cursor pagination. Verified end-to-end (CLI → API →
+  dashboard); Vercel cloud deploy itself left to release step.
+- fix: launcher header test tracks `APP_VERSION` instead of a frozen
+  string; audit file reader shares access with the live writer.
+
 ## 2.2.0 — 2026-10-08
 
 - feat: email intelligence (public OSINT only) — `--email`, `--email-file`,

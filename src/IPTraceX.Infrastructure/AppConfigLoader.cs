@@ -92,8 +92,22 @@ public static class AppConfigLoader
             HibpApiKey = Get("IPTRACEX_HIBP_API_KEY"),
             GitHubToken = Get("IPTRACEX_GITHUB_TOKEN"),
             EmailRiskWeights = Get("IPTRACEX_EMAIL_RISK_WEIGHTS"),
+            AuditEnabled = Get("IPTRACEX_AUDIT_ENABLED").Length == 0 || IsTruthy(Get("IPTRACEX_AUDIT_ENABLED")),
+            AuditEndpoint = Get("IPTRACEX_AUDIT_ENDPOINT"),
+            AuditSecret = Get("IPTRACEX_AUDIT_SECRET"),
+            AuditProject = Get("IPTRACEX_AUDIT_PROJECT"),
+            AuditInstance = Get("IPTRACEX_AUDIT_INSTANCE"),
+            AuditBatchSize = ClampInt(Get("IPTRACEX_AUDIT_BATCH_SIZE"), 50, 1, 500),
+            AuditFlushSeconds = ClampInt(Get("IPTRACEX_AUDIT_FLUSH_INTERVAL"), 5, 1, 300),
+            AuditTimeoutSeconds = ClampInt(Get("IPTRACEX_AUDIT_TIMEOUT"), 10, 2, 120),
+            LogDir = Get("IPTRACEX_LOG_DIR"),
+            LogMaxMb = Math.Max(1L, long.TryParse(Get("IPTRACEX_LOG_MAX_MB"), out long mb) ? mb : 100L),
+            LogRetentionDays = ClampInt(Get("IPTRACEX_LOG_RETENTION_DAYS"), 30, 1, 365),
         };
     }
+
+    private static int ClampInt(string raw, int fallback, int min, int max)
+        => int.TryParse(raw, out int value) ? Math.Min(Math.Max(value, min), max) : fallback;
 
     private static string[] ResolveIntel(string raw)
     {

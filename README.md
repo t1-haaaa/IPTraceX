@@ -26,7 +26,7 @@ source-attributed, every disagreement shown.
 
         MULTI-PROVIDER IP INTELLIGENCE & GEOLOCATION CLI
 
-[::] Version 2.2.0
+[::] Version 2.3.0
 [::] Developer: t1_haaa
 [+] Status: Ready
 
@@ -194,6 +194,9 @@ cat ips.txt | ./iptracex.sh --stdin
 ./iptracex.sh --email user@example.com --investigate
 ./iptracex.sh --email user@example.com --report html
 ./iptracex.sh --email-file emails.txt
+./iptracex.sh --logs --today
+./iptracex.sh --logs --errors
+./iptracex.sh --security-status
 ./iptracex.sh --no-color 8.8.8.8
 ./iptracex.sh --debug 8.8.8.8
 ./iptracex.sh --file tests/fixtures/ip_samples.txt
@@ -219,6 +222,19 @@ profile, evidence, errors and metadata (`investigations/`), then
 reopened, compared (`--compare`, `--compare-ip`), tracked over time
 (timeline with neutral `CHANGE DETECTED` wording), and reported.
 See `docs/investigations.md`.
+
+## Audit Logging & Monitoring
+
+```bash
+./iptracex.sh --logs --today
+./iptracex.sh --security-status
+```
+
+Every operation emits structured audit events (local daily JSONL +
+optional async shipping to the Vercel dashboard). Remote outages never
+block intelligence results. See `docs/audit-logging.md`,
+`docs/event-schema.md`, `docs/security-monitoring.md`,
+`docs/vercel-dashboard.md`.
 
 ## Evidence & Confidence
 

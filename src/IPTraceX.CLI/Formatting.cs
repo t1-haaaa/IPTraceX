@@ -849,6 +849,81 @@ public static class Formatting
             + $"{profile.DomainIntel.MailProvider ?? "unknown provider"} | "
             + $"risk {profile.Risk.Score?.ToString() ?? "unknown"}/{profile.Risk.Level}";
 
+    /// <summary>Local audit log viewer (newest last, like the file).</summary>
+    public static string FormatAuditEvents(IReadOnlyList<AuditEvent> events, Palette p)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("AUDIT LOG")}",
+            "",
+            "    Time       Severity Event",
+            "    ------------------------------------------------------------",
+        };
+        if (events.Count == 0)
+        {
+            lines.Add("    No audit events found.");
+            lines.Add("");
+            return string.Join("\n", lines);
+        }
+
+        foreach (AuditEvent e in events)
+        {
+            string time = e.TimestampUtc.ToString("HH:mm:ss");
+            string provider = e.Provider is null ? "" : $" [{e.Provider}]";
+            string target = e.InvestigationId ?? e.TargetReference ?? "";
+            if (target.Length != 0)
+            {
+                target = " " + target;
+            }
+
+            lines.Add($"    {time}  {e.Severity,-8} {e.EventType}{provider}{target}"
+                + (e.Status is null ? "" : $" ({e.Status})")
+                + (e.DurationMs is null ? "" : $" {e.DurationMs}ms"));
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenInfo()} Events: {events.Count}");
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>Operational security summary over today's local audit log.</summary>
+    public static string FormatSecurityStatus(
+        IReadOnlyList<AuditEvent> events, bool remoteConfigured, Palette p)
+    {
+        int alerts = events.Count(e => e.Severity is "ALERT" or "CRITICAL");
+        int authFail = events.Count(e =>
+            e.EventType is "AUTH_FAILURE" or "DASHBOARD_LOGIN_FAILURE");
+        int rateLimits = events.Count(e =>
+            e.EventType is "RATE_LIMIT_TRIGGERED" or "PROVIDER_RATE_LIMITED");
+        int suspicious = events.Count(e => e.EventType == "SUSPICIOUS_INPUT");
+        int providerFail = events.Count(e =>
+            e.EventType is "PROVIDER_QUERY_ERROR" or "PROVIDER_TIMEOUT");
+        int critical = events.Count(e => e.Severity == "CRITICAL");
+        bool remoteSeen = events.Any(e => e.EventType == "AUDIT_SEND_COMPLETE");
+        bool remoteError = events.Any(e => e.EventType == "AUDIT_SEND_ERROR");
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("IPTraceX SECURITY STATUS")}",
+            "----------------------------",
+            "",
+            $"    Audit:             ONLINE (local JSONL)",
+            $"    Remote:            {(remoteConfigured ? (remoteError && !remoteSeen ? "ERROR" : "CONNECTED") : "DISABLED")}",
+            "",
+            $"    Events Today:      {events.Count}",
+            $"    Security Alerts:   {alerts}",
+            $"    Failed Auth:       {authFail}",
+            $"    Rate Limits:       {rateLimits}",
+            $"    Suspicious Input:  {suspicious}",
+            $"    Provider Failures: {providerFail}",
+            $"    Critical:          {critical}",
+            "",
+        };
+        return string.Join("\n", lines);
+    }
+
     private static string Truncate(string value, int width)
         => value.Length <= width ? value : value[..(width - 3)] + "...";
 }

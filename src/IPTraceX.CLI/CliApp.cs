@@ -43,6 +43,7 @@ public sealed class CliApp
     private readonly IEmailProfileEngine _emailProfiles;
     private readonly Infrastructure.IInvestigationStore _store;
     private readonly Func<CancellationToken, Task<string>> _detectSelf;
+    private readonly IAuditLogger _audit;
 
     public CliApp(
         AppConfig config,
@@ -55,7 +56,8 @@ public sealed class CliApp
         Func<CancellationToken, Task<string>>? detectSelf = null,
         IProfileEngine? profileEngine = null,
         Infrastructure.IInvestigationStore? store = null,
-        IEmailProfileEngine? emailProfiles = null)
+        IEmailProfileEngine? emailProfiles = null,
+        IAuditLogger? audit = null)
     {
         _config = config;
         _palette = palette;
@@ -68,6 +70,61 @@ public sealed class CliApp
         _emailProfiles = emailProfiles ?? new EmailProfileEngineAdapter(config);
         _store = store ?? new Infrastructure.FileInvestigationStore(config.ProjectRoot);
         _detectSelf = detectSelf ?? (ct => Infrastructure.SelfIp.DetectAsync(config.TimeoutSeconds, null, ct));
+        _audit = audit ?? (config.AuditEnabled ? CreateAuditLogger(config) : NullAuditLogger.Instance);
+    }
+
+    private static IAuditLogger CreateAuditLogger(AppConfig config)
+    {
+        try
+        {
+            return new AuditLogger(
+                config.ProjectRoot,
+                string.IsNullOrWhiteSpace(config.AuditEndpoint) ? null : config.AuditEndpoint,
+                string.IsNullOrWhiteSpace(config.LogDir) ? null : config.LogDir,
+                config.LogMaxMb, config.LogRetentionDays,
+                batchSize: config.AuditBatchSize,
+                flushInterval: TimeSpan.FromSeconds(Math.Max(1, config.AuditFlushSeconds)),
+                remoteTimeout: TimeSpan.FromSeconds(Math.Max(2, config.AuditTimeoutSeconds)),
+                auditSecret: config.AuditSecret);
+        }
+        catch (Exception)
+        {
+            return NullAuditLogger.Instance;
+        }
+    }
+
+    /// <summary>Structured audit emission. Never throws, never touches stdout.</summary>
+    private void Audit(
+        string eventType,
+        string severity = AuditSeverity.Info,
+        string? operation = null,
+        string? component = null,
+        string? status = null,
+        long? durationMs = null,
+        string? correlationId = null,
+        string? investigationId = null,
+        string? targetType = null,
+        string? targetReference = null,
+        string? provider = null,
+        int? httpStatus = null,
+        string? errorCode = null,
+        string? errorType = null,
+        string? message = null,
+        IReadOnlyDictionary<string, string>? metadata = null)
+    {
+        try
+        {
+            _audit.Emit(new AuditEvent(
+                AuditIds.NewEvent(), DateTimeOffset.UtcNow, severity, eventType,
+                AuditEventTypes.CategoryFor(eventType),
+                operation, component ?? "cli", status, durationMs,
+                _audit.SessionId, correlationId, investigationId,
+                targetType, targetReference, provider, httpStatus, null,
+                errorCode, errorType, message, metadata));
+        }
+        catch (Exception)
+        {
+        }
     }
 
     public sealed record Options(
@@ -93,9 +150,83 @@ public sealed class CliApp
         string[] Compare,
         string[] CompareIp,
         string? Email,
-        string? EmailFile);
+        string? EmailFile,
+        bool Logs,
+        bool LogToday,
+        bool LogErrors,
+        bool LogSecurity,
+        string? LogProvider,
+        int? LogLast,
+        bool LogJson,
+        bool SecurityStatus);
 
     public async Task<int> RunAsync(string[] args, CancellationToken ct = default)
+    {
+        string correlation = AuditIds.NewCorrelation();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        Audit(AuditEventTypes.ApplicationStart, operation: "startup",
+            correlationId: correlation,
+            metadata: new Dictionary<string, string> { ["argv"] = args.Length.ToString() });
+        Audit(AuditEventTypes.CliCommand, operation: DescribeArgs(args),
+            correlationId: correlation);
+        int exit;
+        try
+        {
+            exit = await RunAsyncInner(args, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Audit(AuditEventTypes.ApplicationError, AuditSeverity.Error,
+                operation: "run", correlationId: correlation,
+                errorType: ex.GetType().Name, message: TrimAudit(ex.Message));
+            throw;
+        }
+        finally
+        {
+            clock.Stop();
+            try
+            {
+                _audit.Flush(TimeSpan.FromSeconds(5));
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        Audit(AuditEventTypes.ApplicationExit, operation: "shutdown",
+            correlationId: correlation, status: exit.ToString(),
+            durationMs: clock.ElapsedMilliseconds);
+        try
+        {
+            _audit.Flush(TimeSpan.FromSeconds(5));
+        }
+        catch (Exception)
+        {
+        }
+
+        return exit;
+    }
+
+    private static string DescribeArgs(string[] args)
+    {
+        foreach (string arg in args)
+        {
+            if (arg.StartsWith("--", StringComparison.Ordinal))
+            {
+                return arg;
+            }
+        }
+
+        return args.Length == 0 ? "interactive" : "lookup";
+    }
+
+    private static string TrimAudit(string? message)
+    {
+        string clean = (message ?? "").Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return clean.Length > 200 ? clean[..200] : clean;
+    }
+
+    public async Task<int> RunAsyncInner(string[] args, CancellationToken ct = default)
     {
         Options opts;
         try
@@ -155,6 +286,16 @@ public sealed class CliApp
         if (opts.Providers)
         {
             return ShowProviders();
+        }
+
+        if (opts.Logs)
+        {
+            return ShowLogs(opts);
+        }
+
+        if (opts.SecurityStatus)
+        {
+            return ShowSecurityStatus();
         }
 
         if (opts.ListInvestigations)
@@ -348,6 +489,10 @@ public sealed class CliApp
         var compareIp = new List<string>();
         string? email = null;
         string? emailFile = null;
+        bool logs = false, logToday = false, logErrors = false, logSecurity = false;
+        string? logProvider = null;
+        int? logLast = null;
+        bool securityStatus = false;
         double? timeout = null;
 
         for (int i = 0; i < args.Length; i++)
@@ -399,6 +544,28 @@ public sealed class CliApp
                     report = args[++i];
                     break;
                 case "--providers": providers = true; break;
+                case "--logs": logs = true; break;
+                case "--today": logToday = true; break;
+                case "--errors": logErrors = true; break;
+                case "--security": logSecurity = true; break;
+                case "--last":
+                    if (i + 1 >= args.Length || !int.TryParse(args[i + 1], out int last) || last <= 0)
+                    {
+                        throw new UsageException("--last requires a positive count.");
+                    }
+
+                    logLast = Math.Min(last, 1000);
+                    i++;
+                    break;
+                case "--provider":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new UsageException("--provider requires a provider value.");
+                    }
+
+                    logProvider = args[++i];
+                    break;
+                case "--security-status": securityStatus = true; break;
                 case "--email":
                     if (i + 1 >= args.Length)
                     {
@@ -497,7 +664,8 @@ public sealed class CliApp
         return new Options(ip, json, file, stdin, map, self, noColor, debug, timeout, version, help,
             domain, rdns, report, providers, investigate, investigation,
             listInvestigations, deleteInvestigation, [.. compare], [.. compareIp],
-            email, emailFile);
+            email, emailFile,
+            logs, logToday, logErrors, logSecurity, logProvider, logLast, json, securityStatus);
     }
 
     public static string HelpText() => string.Join("\n", new[]
@@ -532,6 +700,14 @@ public sealed class CliApp
         "  --compare-ip A B   Compare two IP addresses directly.",
         "  --email ADDRESS    Analyze an email address (public OSINT only).",
         "  --email-file PATH  Batch email analysis, one address per line.",
+        "  --logs             Read the local audit log (filters below).",
+        "  --today            (with --logs) only today's events.",
+        "  --errors           (with --logs) only ERROR/ALERT/CRITICAL.",
+        "  --security         (with --logs) only security-category events.",
+        "  --investigation ID (with --logs) filter by investigation.",
+        "  --provider NAME    (with --logs) filter by provider.",
+        "  --last N           (with --logs) show the last N events.",
+        "  --security-status  Local audit + security summary.",
         "  --no-color         Disable ANSI colors.",
         "  --debug            Verbose technical details.",
         "  --timeout TIMEOUT  Provider timeout in seconds.",
@@ -639,24 +815,45 @@ public sealed class CliApp
     public async Task<int> RunProfileAsync(
         string ipText, bool asJson, Action<string>? onStage, CancellationToken ct)
     {
+        string correlation = AuditIds.NewCorrelation();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        Audit(AuditEventTypes.IpLookupStart, operation: "lookup",
+            correlationId: correlation, targetType: "ip", targetReference: ipText);
         IntelligenceProfile profile;
         try
         {
             profile = await _profiles.AnalyzeIpAsync(ipText, onStage, ct).ConfigureAwait(false);
             _lastOutcomes.Clear();
             _lastOutcomes.AddRange(profile.Providers);
+            Audit(AuditEventTypes.TargetValidation, operation: "validate",
+                correlationId: correlation, status: "valid",
+                targetType: "ip", targetReference: profile.Geo.Ip);
         }
         catch (Exception ex)
         {
+            clock.Stop();
             if (_config.Debug)
             {
                 _error.WriteLine(ex.ToString());
                 _error.WriteLine($"[debug] raw input: {Repr(ipText)}");
             }
 
+            Audit(ex is InvalidIpException
+                    ? AuditEventTypes.TargetRejected : AuditEventTypes.CliError,
+                ex is InvalidIpException ? AuditSeverity.Warning : AuditSeverity.Error,
+                operation: "lookup", correlationId: correlation,
+                targetType: "ip", targetReference: ipText,
+                errorType: ex.GetType().Name, message: TrimAudit(ex.Message));
             _error.WriteLine(FriendlyError(ex));
             return ExitFor(ex);
         }
+
+        AuditProfile(profile, correlation, "ip");
+        clock.Stop();
+        Audit(AuditEventTypes.IpLookupComplete, operation: "lookup",
+            correlationId: correlation, status: ExitOk.ToString(),
+            targetType: "ip", targetReference: profile.Geo.Ip,
+            durationMs: clock.ElapsedMilliseconds);
 
         if (asJson)
         {
@@ -668,6 +865,108 @@ public sealed class CliApp
         }
 
         return ExitOk;
+    }
+
+    /// <summary>Provider + intelligence telemetry for one finished profile.</summary>
+    private void AuditProfile(IntelligenceProfile profile, string correlation, string targetType)
+    {
+        foreach (ProviderOutcome outcome in profile.Providers)
+        {
+            string type = outcome.Status == "success"
+                ? AuditEventTypes.ProviderQueryComplete
+                : (outcome.Error?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true
+                    ? AuditEventTypes.ProviderTimeout
+                    : outcome.Error?.Contains("rate limit", StringComparison.OrdinalIgnoreCase) == true
+                        ? AuditEventTypes.ProviderRateLimited
+                        : AuditEventTypes.ProviderQueryError);
+            Audit(type,
+                type == AuditEventTypes.ProviderQueryComplete ? AuditSeverity.Info : AuditSeverity.Warning,
+                operation: "query", correlationId: correlation,
+                targetType: targetType, targetReference: profile.Geo.Ip,
+                provider: outcome.ProviderId,
+                status: outcome.Status,
+                errorType: outcome.Status == "success" ? null : outcome.Error,
+                message: TrimAudit(outcome.Summary));
+        }
+
+        Audit(AuditEventTypes.ConsensusComplete, operation: "consensus",
+            correlationId: correlation, targetType: targetType, targetReference: profile.Geo.Ip,
+            metadata: new Dictionary<string, string>
+            {
+                ["agreeing"] = profile.Geo.ProvidersAgreeing.ToString(),
+                ["successful"] = profile.Geo.ProvidersSuccessful.ToString(),
+            });
+        Audit(AuditEventTypes.ConfidenceCalculation, operation: "confidence",
+            correlationId: correlation, targetType: targetType, targetReference: profile.Geo.Ip,
+            metadata: new Dictionary<string, string>
+            {
+                ["fields"] = profile.FieldConfidences.Count.ToString(),
+            });
+        Audit(AuditEventTypes.RiskCalculation, operation: "risk",
+            correlationId: correlation, targetType: targetType, targetReference: profile.Geo.Ip,
+            status: profile.Risk.Level,
+            metadata: new Dictionary<string, string>
+            {
+                ["score"] = profile.Risk.Score?.ToString() ?? "unknown",
+                ["contributions"] = profile.Risk.Evidence.Count.ToString(),
+            });
+        Audit(AuditEventTypes.EvidenceBuilt, operation: "evidence",
+            correlationId: correlation, targetType: targetType, targetReference: profile.Geo.Ip,
+            metadata: new Dictionary<string, string>
+            {
+                ["rows"] = Evidence.BuildMatrix(profile).Count.ToString(),
+            });
+    }
+
+    /// <summary>Provider + risk telemetry for one finished email profile.</summary>
+    private void AuditEmailProfile(EmailProfile profile, string correlation)
+    {
+        foreach (ProviderOutcome outcome in profile.Providers)
+        {
+            string type = outcome.Status == "success"
+                ? AuditEventTypes.ProviderQueryComplete
+                : AuditEventTypes.ProviderQueryError;
+            Audit(type,
+                type == AuditEventTypes.ProviderQueryComplete ? AuditSeverity.Info : AuditSeverity.Warning,
+                operation: "query", correlationId: correlation,
+                targetType: "email", targetReference: profile.Normalized,
+                provider: outcome.ProviderId, status: outcome.Status,
+                errorType: outcome.Status == "success" ? null : outcome.Error,
+                message: TrimAudit(outcome.Summary));
+        }
+
+        EmailSecurityExposure security = profile.Security
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+        Audit(AuditEventTypes.EmailBreachCheck, operation: "breach-check",
+            correlationId: correlation, targetType: "email", targetReference: profile.Normalized,
+            status: security.BreachExposure,
+            metadata: new Dictionary<string, string>
+            {
+                ["breaches"] = security.BreachCount.ToString(),
+                ["severity"] = security.Severity,
+            });
+        if (security.PasswordExposure == ExposureStatus.Reported
+            || security.AuthData == ExposureStatus.Reported)
+        {
+            Audit(AuditEventTypes.EmailSecurityAlert, AuditSeverity.Alert,
+                operation: "security-alert", correlationId: correlation,
+                targetType: "email", targetReference: profile.Normalized,
+                status: security.Severity,
+                metadata: new Dictionary<string, string>
+                {
+                    ["password_exposure"] = security.PasswordExposure,
+                    ["auth_data"] = security.AuthData,
+                    ["breaches"] = security.BreachCount.ToString(),
+                });
+        }
+
+        Audit(AuditEventTypes.RiskCalculation, operation: "risk",
+            correlationId: correlation, targetType: "email", targetReference: profile.Normalized,
+            status: profile.Risk.Level,
+            metadata: new Dictionary<string, string>
+            {
+                ["score"] = profile.Risk.Score?.ToString() ?? "unknown",
+            });
     }
 
     public async Task<int> RunDomainAsync(string domain, bool asJson, CancellationToken ct)
@@ -700,10 +999,15 @@ public sealed class CliApp
         _output.WriteLine($"    A            : {_palette.Data(result.resolution.A.Length == 0 ? "none" : string.Join(", ", result.resolution.A))}");
         _output.WriteLine($"    AAAA         : {_palette.Data(result.resolution.Aaaa.Length == 0 ? "none" : string.Join(", ", result.resolution.Aaaa))}");
         _output.WriteLine("");
+        string domainCorrelation = AuditIds.NewCorrelation();
+        Audit(AuditEventTypes.DomainLookupStart, operation: "lookup",
+            correlationId: domainCorrelation, targetType: "domain",
+            targetReference: result.resolution.Domain);
         foreach (IntelligenceProfile profile in result.profiles)
         {
             _lastOutcomes.Clear();
             _lastOutcomes.AddRange(profile.Providers);
+            AuditProfile(profile, domainCorrelation, "domain");
             if (asJson)
             {
                 _output.WriteLine(GeoJson.ProfileToJsonString(profile, indented: true));
@@ -714,6 +1018,13 @@ public sealed class CliApp
             }
         }
 
+        Audit(AuditEventTypes.DomainLookupComplete, operation: "lookup",
+            correlationId: domainCorrelation, status: ExitOk.ToString(),
+            targetType: "domain", targetReference: result.resolution.Domain,
+            metadata: new Dictionary<string, string>
+            {
+                ["ips"] = result.profiles.Count.ToString(),
+            });
         return ExitOk;
     }
 
@@ -760,6 +1071,10 @@ public sealed class CliApp
 
     public async Task<int> RunProfileReportAsync(string ipText, string format, CancellationToken ct)
     {
+        string correlation = AuditIds.NewCorrelation();
+        Audit(AuditEventTypes.ReportGenerationStart, operation: "report",
+            correlationId: correlation, targetType: "ip", targetReference: ipText,
+            metadata: new Dictionary<string, string> { ["format"] = format });
         IntelligenceProfile profile;
         try
         {
@@ -782,10 +1097,18 @@ public sealed class CliApp
         {
             string path = Infrastructure.ReportService.SaveProfile(profile, format, _config.ProjectRoot);
             _output.WriteLine($"[+] Report saved to {path}");
+            Audit(AuditEventTypes.ReportGenerationComplete, operation: "report",
+                correlationId: correlation, status: "success",
+                targetType: "ip", targetReference: profile.Geo.Ip,
+                metadata: new Dictionary<string, string> { ["format"] = format });
             return ExitOk;
         }
         catch (TraceXException ex)
         {
+            Audit(AuditEventTypes.ReportGenerationError, AuditSeverity.Error,
+                operation: "report", correlationId: correlation,
+                targetType: "ip", targetReference: ipText,
+                errorType: ex.GetType().Name, message: TrimAudit(ex.Message));
             _error.WriteLine(FriendlyError(ex));
             return ex.ExitCode;
         }
@@ -823,10 +1146,17 @@ public sealed class CliApp
 
     public async Task<int> RunEmailAsync(string raw, bool asJson, CancellationToken ct)
     {
+        string correlation = AuditIds.NewCorrelation();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        Audit(AuditEventTypes.EmailLookupStart, operation: "lookup",
+            correlationId: correlation, targetType: "email", targetReference: raw.Trim());
         EmailProfile profile;
         try
         {
             EmailValidation.Parse(raw);
+            Audit(AuditEventTypes.EmailValidation, operation: "validate",
+                correlationId: correlation, status: "valid",
+                targetType: "email", targetReference: raw.Trim());
             profile = await _emailProfiles.AnalyzeEmailAsync(raw, null, ct).ConfigureAwait(false);
             _lastOutcomes.Clear();
             _lastOutcomes.AddRange(profile.Providers.Select(o => new ProviderOutcome(
@@ -834,14 +1164,28 @@ public sealed class CliApp
         }
         catch (Exception ex)
         {
+            clock.Stop();
             if (_config.Debug)
             {
                 _error.WriteLine(ex.ToString());
             }
 
+            Audit(ex is InvalidEmailException
+                    ? AuditEventTypes.TargetRejected : AuditEventTypes.CliError,
+                ex is InvalidEmailException ? AuditSeverity.Warning : AuditSeverity.Error,
+                operation: "lookup", correlationId: correlation,
+                targetType: "email", targetReference: raw.Trim(),
+                errorType: ex.GetType().Name, message: TrimAudit(ex.Message));
             _error.WriteLine(FriendlyError(ex));
             return ExitFor(ex);
         }
+
+        AuditEmailProfile(profile, correlation);
+        clock.Stop();
+        Audit(AuditEventTypes.EmailLookupComplete, operation: "lookup",
+            correlationId: correlation, status: ExitOk.ToString(),
+            targetType: "email", targetReference: profile.Normalized,
+            durationMs: clock.ElapsedMilliseconds);
 
         if (asJson)
         {
@@ -972,6 +1316,9 @@ public sealed class CliApp
                 EmailJson.FromEmailProfile(profile));
             _store.Save(investigation);
             _output.WriteLine($"[+] Investigation saved: {investigation.Id}");
+            Audit(AuditEventTypes.InvestigationCreated, operation: "save",
+                investigationId: investigation.Id,
+                targetType: "email", targetReference: profile.Target);
         }
         catch (Exception ex)
         {
@@ -1015,6 +1362,9 @@ public sealed class CliApp
                 Investigation.CurrentSchema,
                 EmailJson.FromEmailProfile(profile));
             _store.Save(investigation);
+            Audit(AuditEventTypes.InvestigationCreated, operation: "save",
+                investigationId: investigation.Id,
+                targetType: "email", targetReference: profile.Target);
         }
         catch (Exception ex)
         {
@@ -1053,12 +1403,22 @@ public sealed class CliApp
 
         _output.WriteLine($"{_palette.TokenInfo()} Processing {unique.Count} email addresses...");
         _output.WriteLine("");
+        string batchCorrelation = AuditIds.NewCorrelation();
+        Audit(AuditEventTypes.BatchStart, operation: "batch",
+            correlationId: batchCorrelation, targetType: "email",
+            metadata: new Dictionary<string, string>
+            {
+                ["items"] = unique.Count.ToString(),
+                ["save"] = save.ToString(),
+            });
         int ok = 0, failed = 0, invalid = 0, index = 0;
         foreach (string candidate in unique)
         {
             index++;
             ct.ThrowIfCancellationRequested();
             _output.WriteLine($"{Formatting.BatchItem(_palette, index)} {candidate}");
+            Audit(AuditEventTypes.BatchItemStart, operation: "batch-item",
+                correlationId: batchCorrelation, targetType: "email", targetReference: candidate);
             EmailProfile profile;
             try
             {
@@ -1066,20 +1426,30 @@ public sealed class CliApp
                 profile = await _emailProfiles.AnalyzeEmailAsync(candidate, null, ct)
                     .ConfigureAwait(false);
             }
-            catch (InvalidEmailException)
+            catch (InvalidEmailException ex)
             {
                 _output.WriteLine("[!] Invalid email address.\n");
+                Audit(AuditEventTypes.BatchItemError, AuditSeverity.Warning,
+                    operation: "batch-item", correlationId: batchCorrelation,
+                    targetType: "email", targetReference: candidate,
+                    errorType: ex.GetType().Name);
                 invalid++;
                 failed++;
                 continue;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 _output.WriteLine("[ERROR] Unexpected error for this address.\n");
+                Audit(AuditEventTypes.BatchItemError, AuditSeverity.Error,
+                    operation: "batch-item", correlationId: batchCorrelation,
+                    targetType: "email", targetReference: candidate,
+                    errorType: ex.GetType().Name);
                 failed++;
                 continue;
             }
 
+            Audit(AuditEventTypes.BatchItemComplete, operation: "batch-item",
+                correlationId: batchCorrelation, targetType: "email", targetReference: candidate);
             _output.WriteLine(Formatting.FormatEmailSummary(profile, _palette));
             if (save)
             {
@@ -1101,6 +1471,9 @@ public sealed class CliApp
                         EmailJson.FromEmailProfile(profile));
                     _store.Save(investigation);
                     _output.WriteLine($"[+] Investigation saved: {investigation.Id}");
+                    Audit(AuditEventTypes.InvestigationCreated, operation: "save",
+                        correlationId: batchCorrelation, investigationId: investigation.Id,
+                        targetType: "email", targetReference: profile.Target);
                     ok++;
                 }
                 catch (Exception ex)
@@ -1123,11 +1496,23 @@ public sealed class CliApp
             _output.WriteLine($"{_palette.TokenInfo()} Investigations: {ok}");
         }
 
+        Audit(AuditEventTypes.BatchComplete, operation: "batch",
+            correlationId: batchCorrelation, targetType: "email",
+            status: (failed == 0 ? ExitOk : ExitGeneral).ToString(),
+            metadata: new Dictionary<string, string>
+            {
+                ["valid"] = ok.ToString(),
+                ["invalid"] = invalid.ToString(),
+            });
         return failed == 0 ? ExitOk : ExitGeneral;
     }
 
     public async Task<int> RunEmailReportAsync(string raw, string format, CancellationToken ct)
     {
+        string correlation = AuditIds.NewCorrelation();
+        Audit(AuditEventTypes.ReportGenerationStart, operation: "report",
+            correlationId: correlation, targetType: "email", targetReference: raw.Trim(),
+            metadata: new Dictionary<string, string> { ["format"] = format });
         EmailProfile profile;
         try
         {
@@ -1150,10 +1535,18 @@ public sealed class CliApp
             string path = Infrastructure.ReportService.SaveEmailProfile(
                 profile, format, _config.ProjectRoot);
             _output.WriteLine($"[+] Report saved to {path}");
+            Audit(AuditEventTypes.ReportGenerationComplete, operation: "report",
+                correlationId: correlation, status: "success",
+                targetType: "email", targetReference: profile.Normalized,
+                metadata: new Dictionary<string, string> { ["format"] = format });
             return ExitOk;
         }
         catch (TraceXException ex)
         {
+            Audit(AuditEventTypes.ReportGenerationError, AuditSeverity.Error,
+                operation: "report", correlationId: correlation,
+                targetType: "email", targetReference: raw.Trim(),
+                errorType: ex.GetType().Name, message: TrimAudit(ex.Message));
             _error.WriteLine(FriendlyError(ex));
             return ex.ExitCode;
         }
@@ -1211,6 +1604,9 @@ public sealed class CliApp
         }
 
         _output.WriteLine($"[+] Investigation saved: {investigation.Id}");
+        Audit(AuditEventTypes.InvestigationCreated, operation: "save",
+            investigationId: investigation.Id,
+            targetType: "ip", targetReference: profile.Geo.Ip);
         _output.WriteLine(Formatting.FormatProfile(profile, _palette));
         return ExitOk;
     }
@@ -1241,16 +1637,25 @@ public sealed class CliApp
 
         _output.WriteLine(Formatting.BatchHeader(_palette, unique.Count));
         _output.WriteLine("");
+        string batchCorrelation = AuditIds.NewCorrelation();
+        Audit(AuditEventTypes.BatchStart, operation: "batch",
+            correlationId: batchCorrelation, targetType: "ip",
+            metadata: new Dictionary<string, string> { ["items"] = unique.Count.ToString() });
         int ok = 0, failed = 0, index = 0;
         foreach (string candidate in unique)
         {
             index++;
             ct.ThrowIfCancellationRequested();
             _output.WriteLine($"{Formatting.BatchItem(_palette, index)} {candidate}");
+            Audit(AuditEventTypes.BatchItemStart, operation: "batch-item",
+                correlationId: batchCorrelation, targetType: "ip", targetReference: candidate);
             IntelligenceProfile? profile = await AnalyzeProfileAsync(candidate, null, ct)
                 .ConfigureAwait(false);
             if (profile is null)
             {
+                Audit(AuditEventTypes.BatchItemError, AuditSeverity.Warning,
+                    operation: "batch-item", correlationId: batchCorrelation,
+                    targetType: "ip", targetReference: candidate);
                 failed++;
                 continue;
             }
@@ -1260,17 +1665,109 @@ public sealed class CliApp
                 Investigation investigation = BuildInvestigation(profile.Geo.Ip, "ip", profile);
                 _store.Save(investigation);
                 _output.WriteLine($"[+] Investigation saved: {investigation.Id}\n");
+                Audit(AuditEventTypes.InvestigationCreated, operation: "save",
+                    correlationId: batchCorrelation, investigationId: investigation.Id,
+                    targetType: "ip", targetReference: profile.Geo.Ip);
+                Audit(AuditEventTypes.BatchItemComplete, operation: "batch-item",
+                    correlationId: batchCorrelation, targetType: "ip", targetReference: candidate);
                 ok++;
             }
             catch (Exception ex)
             {
                 _error.WriteLine(FriendlyError(ex));
+                Audit(AuditEventTypes.BatchItemError, AuditSeverity.Error,
+                    operation: "batch-item", correlationId: batchCorrelation,
+                    targetType: "ip", targetReference: candidate,
+                    errorType: ex.GetType().Name);
                 failed++;
             }
         }
 
         _output.WriteLine(Formatting.BatchSummary(_palette, ok, failed));
+        Audit(AuditEventTypes.BatchComplete, operation: "batch",
+            correlationId: batchCorrelation, targetType: "ip",
+            status: (failed == 0 ? ExitOk : ExitGeneral).ToString());
         return failed == 0 ? ExitOk : ExitGeneral;
+    }
+
+    public int ShowLogs(Options opts)
+    {
+        string? day = opts.LogToday ? DateTimeOffset.UtcNow.ToString("yyyy-MM-dd") : null;
+        IReadOnlyList<AuditEvent> events;
+        try
+        {
+            events = Infrastructure.FileAuditSink.Read(
+                _config.ProjectRoot, day,
+                string.IsNullOrWhiteSpace(_config.LogDir) ? null : _config.LogDir);
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ExitGeneral;
+        }
+
+        IEnumerable<AuditEvent> query = events;
+        if (opts.LogErrors)
+        {
+            query = query.Where(e => e.Severity is AuditSeverity.Error or AuditSeverity.Alert or AuditSeverity.Critical);
+        }
+
+        if (opts.LogSecurity)
+        {
+            query = query.Where(e => e.Category == "security" || e.Severity is AuditSeverity.Alert or AuditSeverity.Critical);
+        }
+
+        if (opts.Investigation is not null)
+        {
+            query = query.Where(e => string.Equals(e.InvestigationId, opts.Investigation, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (opts.LogProvider is not null)
+        {
+            query = query.Where(e => string.Equals(e.Provider, opts.LogProvider, StringComparison.OrdinalIgnoreCase));
+        }
+
+        List<AuditEvent> filtered = query.ToList();
+        if (opts.LogLast.HasValue && filtered.Count > opts.LogLast.Value)
+        {
+            filtered = filtered.Skip(filtered.Count - opts.LogLast.Value).ToList();
+        }
+
+        Audit(AuditEventTypes.CliCommand, operation: "logs",
+            metadata: new Dictionary<string, string> { ["shown"] = filtered.Count.ToString() });
+        if (opts.Json)
+        {
+            foreach (AuditEvent e in filtered)
+            {
+                _output.WriteLine(AuditJson.ToJsonLines(e));
+            }
+
+            return ExitOk;
+        }
+
+        _output.WriteLine(Formatting.FormatAuditEvents(filtered, _palette));
+        return ExitOk;
+    }
+
+    public int ShowSecurityStatus()
+    {
+        IReadOnlyList<AuditEvent> events;
+        try
+        {
+            events = Infrastructure.FileAuditSink.Read(
+                _config.ProjectRoot, DateTimeOffset.UtcNow.ToString("yyyy-MM-dd"),
+                string.IsNullOrWhiteSpace(_config.LogDir) ? null : _config.LogDir);
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ExitGeneral;
+        }
+
+        Audit(AuditEventTypes.CliCommand, operation: "security-status");
+        _output.WriteLine(Formatting.FormatSecurityStatus(
+            events, remoteConfigured: !string.IsNullOrWhiteSpace(_config.AuditEndpoint), _palette));
+        return ExitOk;
     }
 
     public int ListInvestigations()
@@ -1305,6 +1802,14 @@ public sealed class CliApp
 
     public int DeleteInvestigation(string id)
     {
+        if (LooksLikeTraversal(id))
+        {
+            Audit(AuditEventTypes.SuspiciousInput, AuditSeverity.Alert,
+                operation: "delete-investigation", investigationId: id.Trim(),
+                errorCode: "PATH_TRAVERSAL",
+                message: "Path traversal pattern in investigation ID.");
+        }
+
         try
         {
             _store.Delete(id);
@@ -1316,11 +1821,27 @@ public sealed class CliApp
         }
 
         _output.WriteLine($"[+] Deleted investigation {id.Trim()}.");
+        Audit(AuditEventTypes.InvestigationDeleted, operation: "delete",
+            investigationId: id.Trim());
         return ExitOk;
     }
 
+    private static bool LooksLikeTraversal(string? id)
+        => id is not null && (id.Contains("..", StringComparison.Ordinal)
+            || id.Contains('/', StringComparison.Ordinal)
+            || id.Contains('\\')
+            || id.Any(char.IsControl));
+
     public int ShowInvestigation(string id)
     {
+        if (LooksLikeTraversal(id))
+        {
+            Audit(AuditEventTypes.SuspiciousInput, AuditSeverity.Alert,
+                operation: "show-investigation", investigationId: id.Trim(),
+                errorCode: "PATH_TRAVERSAL",
+                message: "Path traversal pattern in investigation ID.");
+        }
+
         Investigation investigation;
         try
         {
@@ -1332,6 +1853,9 @@ public sealed class CliApp
             return ex is TraceXException tx ? tx.ExitCode : ExitGeneral;
         }
 
+        Audit(AuditEventTypes.InvestigationLoaded, operation: "open",
+            investigationId: investigation.Id,
+            targetType: investigation.TargetType, targetReference: investigation.Target);
         _output.WriteLine(Formatting.FormatInvestigation(investigation, _palette));
         IReadOnlyList<Investigation> history;
         try
@@ -1345,6 +1869,13 @@ public sealed class CliApp
 
         if (history.Count > 1)
         {
+            Audit(AuditEventTypes.TimelineGenerated, operation: "timeline",
+                investigationId: investigation.Id,
+                targetType: investigation.TargetType, targetReference: investigation.Target,
+                metadata: new Dictionary<string, string>
+                {
+                    ["entries"] = history.Count.ToString(),
+                });
             _output.WriteLine(Formatting.FormatTimeline(history, _palette));
         }
 
@@ -1365,6 +1896,12 @@ public sealed class CliApp
             return ex is TraceXException tx ? tx.ExitCode : ExitGeneral;
         }
 
+        Audit(AuditEventTypes.InvestigationCompared, operation: "compare",
+            metadata: new Dictionary<string, string>
+            {
+                ["first"] = first.Id,
+                ["second"] = second.Id,
+            });
         _output.WriteLine(Formatting.FormatComparison(first, second, _palette));
         return ExitOk;
     }

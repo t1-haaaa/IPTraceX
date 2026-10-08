@@ -48,6 +48,14 @@ jobs:
           ./IPTraceX --email user@gmail.com --investigate
           ./IPTraceX --list-investigations
           ./IPTraceX --email-file /dev/null || true
+      - name: Audit log smoke
+        run: |
+          smoke_dir=$(mktemp -d)
+          cp ./IPTraceX "$smoke_dir/"
+          cd "$smoke_dir"
+          ./IPTraceX --security-status
+          ./IPTraceX --logs --last 5
+          ./IPTraceX --logs --json --last 2
       - name: Launcher behavior tests
         run: |
           chmod +x tests/launcher/run_tests.sh
@@ -56,3 +64,22 @@ jobs:
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: .
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: npm
+          cache-dependency-path: apps/dashboard/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: API tests
+        run: npm test
+      - name: Production build
+        run: npm run build
