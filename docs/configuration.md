@@ -11,6 +11,9 @@
 | `IPTRACEX_GLOBAL_TIMEOUT` | `90`                       | Whole-investigation seconds (10–600)  |
 | `IPTRACEX_MAX_CONCURRENCY` | `4`                       | Intel providers in flight (1–16)      |
 | `IPTRACEX_RISK_WEIGHTS` | defaults                     | e.g. `tor=35,proxy=20` (see risk doc) |
+| `IPTRACEX_HIBP_API_KEY` | empty                      | Optional HIBP key (email breach metadata) |
+| `IPTRACEX_GITHUB_TOKEN` | empty                      | Optional GitHub token (email footprint) |
+| `IPTRACEX_EMAIL_RISK_WEIGHTS` | defaults               | e.g. `disposable=20,breach=10,suspicious=15` |
 | `IPTRACEX_CACHE_TTL`  | `3600`                         | Seconds, `0` disables cache           |
 | `IPTRACEX_NO_COLOR`   | empty                          | `1` disables colors                   |
 | `IPTRACEX_DEBUG`      | empty                          | `1` shows tracebacks (no secrets)     |

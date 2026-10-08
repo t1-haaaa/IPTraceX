@@ -273,13 +273,14 @@ public static class Formatting
             "",
             "[01] Analyze IP",
             "[02] Analyze domain",
-            "[03] Self IP intelligence",
-            "[04] Reverse DNS",
-            "[05] Provider status",
-            "[06] Batch analysis from file",
-            "[07] Generate investigation report",
+            "[03] Analyze email",
+            "[04] Self IP intelligence",
+            "[05] Reverse DNS",
+            "[06] Provider status",
+            "[07] Batch analysis from file",
             "[08] Investigations",
-            "[09] Configuration",
+            "[09] Reports",
+            "[10] Configuration",
             "[00] Exit",
             "",
             $"{p.TokenAsk()} Select an option:",
@@ -304,6 +305,16 @@ public static class Formatting
 
     public static string FormatInvestigation(Investigation investigation, Palette p)
     {
+        if (investigation.Email is not null && investigation.TargetType == "email")
+        {
+            return FormatEmailInvestigation(investigation, p);
+        }
+
+        if (investigation.Profile is null)
+        {
+            return $"\n{p.TokenError()} Investigation data unavailable.\n";
+        }
+
         var lines = new List<string>
         {
             "",
@@ -317,6 +328,132 @@ public static class Formatting
         lines.Add(FormatProfile(investigation.Profile, p).Trim('\n'));
         lines.Add("");
         lines.Add(FormatEvidenceMatrix(investigation.Profile, p).Trim('\n'));
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    public static string FormatEmailInvestigation(Investigation investigation, Palette p)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("EMAIL INVESTIGATION")}",
+            $"    ID           : {p.Data(investigation.Id)}",
+            $"    Target       : {p.Data(investigation.Target)}",
+            $"    Timestamp    : {p.Data(investigation.TimestampUtc.ToString("yyyy-MM-dd HH:mm"))} UTC",
+            $"    Tool         : {p.Data($"IPTraceX {investigation.ToolVersion}")}",
+            "",
+        };
+        if (investigation.Email is not null)
+        {
+            lines.Add(FormatStoredEmail(investigation.Email, investigation.Target, p).Trim('\n'));
+            lines.Add("");
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    private static string FormatStoredEmail(
+        System.Text.Json.Nodes.JsonObject email, string target, Palette p)
+    {
+        string Str(string key) => email[key]?.GetValue<string?>() ?? "Unknown";
+        return string.Join("\n", new[]
+        {
+            $"{p.TokenOk()} {p.Brand("EMAIL INTELLIGENCE")}",
+            $"    Target       : {p.Data(target)}",
+            $"    Domain       : {p.Data(Str("domain"))}",
+            "",
+        });
+    }
+
+    /// <summary>Human-readable email profile from live analysis.</summary>
+    public static string FormatEmailProfile(EmailProfile profile, Palette p)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("EMAIL INTELLIGENCE")}",
+            "",
+            $"    Target       : {p.Data(profile.Target)}",
+            $"    Domain       : {p.Data(profile.Domain)}",
+            "",
+            $"{p.TokenOk()} {p.Brand("DOMAIN INTELLIGENCE")}",
+            $"    MX           : {p.Data(profile.DomainIntel.MxHosts.Length == 0 ? "none" : string.Join(", ", profile.DomainIntel.MxHosts))}",
+            $"    Mail Provider: {p.Data(profile.DomainIntel.MailProvider ?? "Unknown")}",
+            $"    SPF          : {p.Data(profile.DomainIntel.SpfRecord is null ? "NOT FOUND" : "FOUND")}",
+            $"    DMARC        : {p.Data(profile.DomainIntel.DmarcRecord is null ? "NOT FOUND" : "FOUND")}",
+            $"    DNSSEC       : {p.Data(profile.DomainIntel.DnssecStatus)}",
+            $"    Disposable   : {p.Data(profile.DomainIntel.DisposableStatus)}",
+            $"    Registrar    : {p.Data(profile.DomainIntel.Registrar ?? "Unknown")}",
+            "",
+            $"{p.TokenOk()} {p.Brand("PUBLIC AVATAR")}",
+            $"    Status       : {p.Data(profile.Avatar.Status)}",
+        };
+        if (profile.Avatar.Url is not null)
+        {
+            lines.Add($"    URL          : {p.Data(profile.Avatar.Url)}");
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenOk()} {p.Brand("PUBLIC FOOTPRINT")}");
+        if (profile.Footprint.Count == 0)
+        {
+            lines.Add("    No public matches observed.");
+        }
+
+        foreach (FootprintMatch match in profile.Footprint)
+        {
+            lines.Add($"    [{match.Platform}] {p.Data(match.Url)}");
+            lines.Add($"      {match.EvidenceType}: {match.MatchedValue} ({match.Confidence})");
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenOk()} {p.Brand("BREACH INTELLIGENCE")}");
+        if (profile.Breaches.Count == 0)
+        {
+            lines.Add("    No breach indicators (or no breach source configured).");
+        }
+
+        foreach (BreachInfo breach in profile.Breaches)
+        {
+            lines.Add($"    {p.Data(breach.Name)}"
+                + (breach.Date is null ? "" : $" ({breach.Date})")
+                + (breach.Domain is null ? "" : $" [{breach.Domain}]"));
+            if (breach.Categories.Length != 0)
+            {
+                lines.Add($"      Categories: {string.Join(", ", breach.Categories)}");
+            }
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenOk()} {p.Brand("EMAIL RISK")}");
+        lines.Add($"    Score        : {p.Data(profile.Risk.Score.HasValue ? $"{profile.Risk.Score}/100" : "unknown")}");
+        lines.Add($"    Level        : {p.Data(profile.Risk.Level)}");
+        foreach (RiskEvidence e in profile.Risk.Evidence)
+        {
+            lines.Add($"    +{e.Weight,-3} {p.Data(e.Indicator)} [{e.Severity}] ({e.Source})");
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenOk()} {p.Brand("EMAIL CONFIDENCE")}");
+        foreach (FieldConfidence field in profile.FieldConfidences)
+        {
+            lines.Add($"    {field.Field,-12} : {p.Data(field.Value ?? "Unknown")} ({field.Confidence.ToUpperInvariant()})");
+            lines.Add($"                   {field.Reason}");
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenOk()} {p.Brand("EMAIL PROVIDERS")}");
+        foreach (ProviderOutcome outcome in profile.Providers)
+        {
+            lines.Add($"    {p.Data(outcome.ProviderId.PadRight(14))} : {outcome.Status}"
+                + (outcome.Error is null ? "" : $" ({outcome.Error})"));
+        }
+
+        lines.Add("");
+        lines.Add(p.TokenWarn() + " NOTE");
+        lines.Add("    Email intelligence is approximate and limited to public sources.");
+        lines.Add("    Weak correlations are labeled as such, never as identity.");
         lines.Add("");
         return string.Join("\n", lines);
     }
@@ -362,10 +499,19 @@ public static class Formatting
         };
         foreach (Investigation item in ordered)
         {
-            var snap = Evidence.Snapshot(item.Profile);
             lines.Add($"    {item.TimestampUtc:yyyy-MM-dd}  {item.Id}");
-            lines.Add($"      ASN: {snap["ASN"] ?? "Unknown"}  "
-                + $"Risk: {snap["Risk"] ?? "unknown"}  Tor: {snap["Tor"] ?? "UNKNOWN"}");
+            if (item.Profile is not null)
+            {
+                var snap = Evidence.Snapshot(item.Profile);
+                lines.Add($"      ASN: {snap["ASN"] ?? "Unknown"}  "
+                    + $"Risk: {snap["Risk"] ?? "unknown"}  Tor: {snap["Tor"] ?? "UNKNOWN"}");
+            }
+            else if (item.Email is not null)
+            {
+                var snap = Evidence.EmailSnapshotFromJson(item.Email);
+                lines.Add($"      Domain: {snap["Domain"] ?? "Unknown"}  "
+                    + $"Risk: {snap["Risk"] ?? "unknown"}  Breaches: {snap["Breaches"] ?? "0"}");
+            }
         }
 
         List<string> changes = Evidence.TimelineChanges(ordered);
@@ -456,6 +602,51 @@ public static class Formatting
         lines.Add("");
         return string.Join("\n", lines);
     }
+
+    public static string FormatEmailEvidence(EmailProfile profile, Palette p)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("EMAIL EVIDENCE")}",
+            "",
+            "    Field        Value                     Status",
+            "    ------------------------------------------------------------",
+            $"    {"domain",-12} {Truncate(profile.Domain, 25).PadRight(25)} SUPPORT",
+            $"    {"mail-provider",-12} {Truncate(profile.DomainIntel.MailProvider ?? "Unknown", 25).PadRight(25)} {(profile.DomainIntel.MailProvider is null ? "MISSING" : "SUPPORT")}",
+            $"    {"disposable",-12} {Truncate(profile.DomainIntel.DisposableStatus, 25).PadRight(25)} {(profile.DomainIntel.DisposableStatus == "UNKNOWN" ? "MISSING" : "SUPPORT")}",
+            $"    {"avatar",-12} {Truncate(profile.Avatar.Status, 25).PadRight(25)} {(profile.Avatar.Status == "UNKNOWN" ? "MISSING" : "SUPPORT")}",
+            $"    {"breaches",-12} {Truncate(profile.Breaches.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), 25).PadRight(25)} SUPPORT",
+            "",
+        };
+        return string.Join("\n", lines);
+    }
+
+    public static string FormatEmailDomain(EmailProfile profile, Palette p)
+    {
+        var d = profile.DomainIntel;
+        return string.Join("\n", new[]
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("EMAIL DOMAIN INTELLIGENCE")}",
+            "",
+            $"    Domain       : {p.Data(profile.Domain)}",
+            $"    MX           : {p.Data(d.MxHosts.Length == 0 ? "none" : string.Join(", ", d.MxHosts))}",
+            $"    Mail Provider: {p.Data(d.MailProvider ?? "Unknown")}",
+            $"    SPF          : {p.Data(d.SpfRecord is null ? "NOT FOUND" : "FOUND")}",
+            $"    DMARC        : {p.Data(d.DmarcRecord is null ? "NOT FOUND" : "FOUND")}",
+            $"    DNSSEC       : {p.Data(d.DnssecStatus)}",
+            $"    Disposable   : {p.Data(d.DisposableStatus)}",
+            $"    Free mail    : {p.Data(d.IsFreeMail ? "YES" : "NO")}",
+            $"    Registrar    : {p.Data(d.Registrar ?? "Unknown")}",
+            "",
+        });
+    }
+
+    public static string FormatEmailSummary(EmailProfile profile, Palette p)
+        => $"{p.TokenOk()} {profile.Target} | "
+            + $"{profile.DomainIntel.MailProvider ?? "unknown provider"} | "
+            + $"risk {profile.Risk.Score?.ToString() ?? "unknown"}/{profile.Risk.Level}";
 
     private static string Truncate(string value, int width)
         => value.Length <= width ? value : value[..(width - 3)] + "...";

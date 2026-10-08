@@ -82,7 +82,7 @@ public sealed class InvestigationTests : IDisposable
         Assert.Equal(saved.Id, loaded.Id);
         Assert.Equal(saved.Target, loaded.Target);
         Assert.Equal("2.1", loaded.SchemaVersion);
-        Assert.Equal("United States", loaded.Profile.Geo.Geolocation.Country);
+        Assert.Equal("United States", loaded.Profile!.Geo.Geolocation.Country);
         Assert.Single(store.List());
         store.Delete(saved.Id);
         Assert.False(store.Exists(saved.Id));
@@ -149,7 +149,7 @@ public sealed class InvestigationTests : IDisposable
         var investigation = Make() with { Profile = profile };
         store.Save(investigation);
         Investigation loaded = store.Get(investigation.Id);
-        Assert.NotEmpty(loaded.Profile.Geo.Votes);
+        Assert.NotEmpty(loaded.Profile!.Geo.Votes);
         Assert.NotEmpty(Evidence.BuildMatrix(loaded.Profile));
     }
 

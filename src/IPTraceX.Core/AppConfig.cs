@@ -20,6 +20,9 @@ public sealed class AppConfig
     public double GlobalTimeoutSeconds { get; set; } = 90.0;
     public string RiskWeights { get; set; } = "";
     public string AbuseIpDbKey { get; set; } = "";
+    public string HibpApiKey { get; set; } = "";
+    public string GitHubToken { get; set; } = "";
+    public string EmailRiskWeights { get; set; } = "";
 
     public static readonly string[] DefaultProviders = ["ipwho.is", "ipapi.co", "ipinfo.io"];
 }

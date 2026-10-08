@@ -4,6 +4,9 @@
 ./iptracex.sh --report html 8.8.8.8
 ./iptracex.sh --report json 8.8.8.8
 ./iptracex.sh --report txt 8.8.8.8
+./iptracex.sh --email user@example.com --report html
+./iptracex.sh --email user@example.com --report json
+./iptracex.sh --email user@example.com --report txt
 ```
 
 Also from the interactive menu (`[07]`) and the post-lookup menu (`[04]`
@@ -29,3 +32,9 @@ reports/
 Filenames are sanitized (IPv6 colons become underscores, capped length,
 traversal-checked). Reports never contain secrets: tokens are shown only
 as `set`/`not set`, never by value.
+
+Email reports (`iptracex-email-*`) cover investigation metadata, target,
+normalization, domain/DNS, mail provider, SPF/DMARC, disposable, avatar,
+public footprint, breach metadata, reputation, risk, evidence,
+confidence, providers, timeline notes, warnings, and sources — as
+self-contained offline HTML with all values escaped.

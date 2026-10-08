@@ -5,7 +5,12 @@
 [![Linux](https://img.shields.io/badge/platform-linux--x64-lightgrey.svg)](https://github.com/t1-haaaa/IPTraceX)
 [![CI](https://github.com/t1-haaaa/IPTraceX/actions/workflows/ci.yml/badge.svg)](https://github.com/t1-haaaa/IPTraceX/actions/workflows/ci.yml)
 
-A modern multi-provider IP intelligence and geolocation CLI for Linux.
+A modern multi-provider IP, domain, and email intelligence CLI for Linux.
+
+Enter an IP, domain, or email → receive a complete Intelligence Profile: location, network
+and ASN intelligence, DNS, VPN/proxy/Tor verdicts, an evidence-driven
+risk score, and a professional investigation report — every fact
+source-attributed, every disagreement shown.
 
 Enter an IP → receive a complete Intelligence Profile: location, network
 and ASN intelligence, DNS, VPN/proxy/Tor verdicts, an evidence-driven
@@ -21,7 +26,7 @@ source-attributed, every disagreement shown.
 
         MULTI-PROVIDER IP INTELLIGENCE & GEOLOCATION CLI
 
-[::] Version 2.1.0
+[::] Version 2.2.0
 [::] Developer: t1_haaa
 [+] Status: Ready
 
@@ -89,6 +94,10 @@ and what it all means as a transparent risk score.
 - Consensus + per-field confidence + visible disagreement
 - Investigation reports: txt, json, html
 - Investigations: save, reopen, compare, timeline, evidence matrix
+  (`IPX-` for IPs, `EMX-` for emails)
+- Email intelligence (public OSINT only): domain/MX/SPF/DMARC,
+  disposable classification, public avatar, public footprint,
+  key-gated breach metadata, email risk + confidence
 - Interactive main menu + full direct CLI
 - JSON output (backward compatible, additive only)
 - Batch/stdin, provider-aware cache, Google Maps, self-IP detection
@@ -180,12 +189,17 @@ A real captured transcript lives in [`docs/demo.txt`](docs/demo.txt).
 ./iptracex.sh --compare-ip 1.1.1.1 8.8.8.8
 ./iptracex.sh --file ips.txt
 cat ips.txt | ./iptracex.sh --stdin
+./iptracex.sh --email user@example.com
+./iptracex.sh --json --email user@example.com
+./iptracex.sh --email user@example.com --investigate
+./iptracex.sh --email user@example.com --report html
+./iptracex.sh --email-file emails.txt
 ./iptracex.sh --no-color 8.8.8.8
 ./iptracex.sh --debug 8.8.8.8
 ./iptracex.sh --file tests/fixtures/ip_samples.txt
 ```
 
-Interactive menu after startup: analyze IP/domain, self IP, reverse DNS,
+Interactive menu after startup: analyze IP/domain/email, self IP, reverse DNS,
 provider status, batch file, investigation report, investigations,
 configuration, exit — plus the classic post-lookup actions.
 See `docs/usage.md`.
@@ -287,6 +301,23 @@ Resolves A/AAAA via the system resolver (DNS only — no port scanning,
 no active probing), drops non-public hits, and builds a full profile per
 discovered IP plus an infrastructure summary.
 
+## Email Intelligence
+
+```bash
+./iptracex.sh --email user@example.com
+./iptracex.sh --email user@example.com --investigate
+./iptracex.sh --compare EMX-20261008-A7F31C EMX-20261008-B82D4E
+```
+
+Public-OSINT only: domain/MX/SPF/DMARC/DNSSEC, disposable and
+free-mail classification, public avatar, public footprint, optional
+HIBP breach metadata (`IPTRACEX_HIBP_API_KEY`), email risk and
+explained confidence — saved under `EMX-YYYYMMDD-XXXXXX` IDs with
+comparison and timeline support. No logins, no private data, no
+identity claims from weak signals.
+See `docs/email-intelligence.md`, `docs/email-providers.md`,
+`docs/email-risk.md`, `docs/email-privacy.md`.
+
 ## Reverse DNS
 
 ```bash
@@ -316,7 +347,9 @@ consensus/confidence, errors, timestamp, tool version. See
 Original keys (`ip`, `ip_version`, `geolocation`, `network`,
 `google_maps_url`, `geoip_quality`, `providers`) are frozen; new
 sections (`target`, `dns`, `security`, `risk`, `asn`, `consensus`,
-`metadata`) are additive.
+`metadata`) are additive. Email mode emits `"target_type": "email"`
+with `email_domain`, `avatar`, `public_footprint`,
+`breach_intelligence`, `reputation`, `evidence`, `confidence` sections.
 
 ## Configuration
 
@@ -326,6 +359,9 @@ sections (`target`, `dns`, `security`, `risk`, `asn`, `consensus`,
 | `IPTRACEX_INTEL` | `ripestat,doh-cloudflare,doh-google,system-dns,tor-exits,cloud-ranges` | Intel providers |
 | `IPINFO_TOKEN` | empty | Optional ipinfo.io token |
 | `IPTRACEX_ABUSEIPDB_KEY` | empty | Optional AbuseIPDB key (enables reputation) |
+| `IPTRACEX_HIBP_API_KEY` | empty | Optional HIBP key (enables breach metadata) |
+| `IPTRACEX_GITHUB_TOKEN` | empty | Optional GitHub token (commit-authorship footprint) |
+| `IPTRACEX_EMAIL_RISK_WEIGHTS` | defaults | e.g. `disposable=20,breach=10,suspicious=15` |
 | `IPTRACEX_TIMEOUT` | `10` | Per-provider seconds (1–60) |
 | `IPTRACEX_GLOBAL_TIMEOUT` | `90` | Whole-investigation seconds (10–600) |
 | `IPTRACEX_MAX_CONCURRENCY` | `4` | Intel providers in flight (1–16) |

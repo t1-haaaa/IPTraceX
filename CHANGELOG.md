@@ -3,7 +3,18 @@
 All notable changes to IPTraceX are documented here.
 Format follows Keep a Changelog; versions follow SemVer.
 
-## Unreleased
+## 2.2.0 — 2026-10-08
+
+- feat: email intelligence (public OSINT only) — `--email`, `--email-file`,
+  `[03] Analyze email`: normalization + validation, domain/MX/SPF/DMARC/
+  DNSSEC/RDAP intel, disposable + free-mail + mail-provider classification,
+  public avatar (Gravatar), public footprint (GitHub handle/commit tiers),
+  key-gated HIBP breach metadata, email reputation + transparent risk
+  (`IPTRACEX_EMAIL_RISK_WEIGHTS`), explained confidence, `EMX-` investigations
+  with compare/timeline/batch/reports, `"target_type": "email"` JSON.
+  Keys (`IPTRACEX_HIBP_API_KEY`, `IPTRACEX_GITHUB_TOKEN`) are env-only and
+  never stored; see `docs/email-intelligence.md`, `docs/email-providers.md`,
+  `docs/email-risk.md`, `docs/email-privacy.md`.
 
 ## 2.1.0 — 2026-10-08
 

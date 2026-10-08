@@ -89,6 +89,9 @@ public static class AppConfigLoader
             GlobalTimeoutSeconds = globalTimeout,
             RiskWeights = Get("IPTRACEX_RISK_WEIGHTS"),
             AbuseIpDbKey = Get("IPTRACEX_ABUSEIPDB_KEY"),
+            HibpApiKey = Get("IPTRACEX_HIBP_API_KEY"),
+            GitHubToken = Get("IPTRACEX_GITHUB_TOKEN"),
+            EmailRiskWeights = Get("IPTRACEX_EMAIL_RISK_WEIGHTS"),
         };
     }
 

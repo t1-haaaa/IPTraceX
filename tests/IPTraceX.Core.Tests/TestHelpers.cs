@@ -54,6 +54,33 @@ internal sealed class FakeFetcher : IGeoJsonFetcher
     }
 }
 
+internal sealed class FakeEmailEngine : IEmailProfileEngine
+{
+    private readonly Func<string, EmailProfile> _handler;
+    private readonly Exception? _error;
+
+    public List<string> Calls { get; } = [];
+
+    public FakeEmailEngine(
+        Func<string, EmailProfile>? handler = null, Exception? error = null)
+    {
+        _handler = handler ?? (_ => Sample.EmailProfile());
+        _error = error;
+    }
+
+    public Task<EmailProfile> AnalyzeEmailAsync(
+        string email, Action<string>? onStage = null, CancellationToken cancellationToken = default)
+    {
+        Calls.Add(email);
+        if (_error is not null)
+        {
+            throw _error;
+        }
+
+        return Task.FromResult(_handler(email));
+    }
+}
+
 internal sealed class FakeProfileEngine : IProfileEngine
 {
     private readonly Func<string, IntelligenceProfile> _handler;
@@ -154,8 +181,7 @@ internal static class Sample
         AgreementRatio = 1.0,
     };
 
-    public static IntelligenceProfile Profile() => new(
-        "35.94.45.221", 4, false, Result(),
+    public static IntelligenceProfile Profile() => new("35.94.45.221", 4, false, Result(),
         new AsnIntelligence(
             "AS16509", "Amazon.com, Inc.", null, "35.92.0.0/16", "ARIN",
             "US", "AMAZON-EC2", ["geo-consensus", "ripestat"]),
@@ -192,6 +218,30 @@ internal static class Sample
             "1.0.0", DateTimeOffset.UtcNow, 12,
             ["ipwho.is", "ripestat"], 2, false));
 
+    public static EmailProfile EmailProfile() => new(
+        "user@gmail.com", "user@gmail.com", "gmail.com",
+        new EmailDomainIntel(
+            "gmail.com",
+            ["gmail-smtp-in.l.google.com"], "v=spf1 redirect=_spf.google.com",
+            "v=DMARC1; p=none", "UNKNOWN", "NOT DETECTED", "HIGH", ["email-domain"],
+            true, "Google (Gmail / Workspace)", "MarkMonitor Inc.",
+            new DateTimeOffset(1995, 8, 13, 4, 0, 0, TimeSpan.Zero), null,
+            ["email-domain", "rdap"]),
+        new AvatarIntel("UNKNOWN", null, null, "UNKNOWN"),
+        [],
+        [],
+        new EmailReputation("NOT DETECTED", 0, [], "NOT DETECTED", [], "MEDIUM",
+            ["email-domain"]),
+        new RiskAssessment(null, "UNKNOWN", [], false),
+        [
+            new FieldConfidence("domain", "gmail.com", "medium", 1, 1,
+                "Directly parsed.", [], []),
+        ],
+        [new ProviderOutcome("email-domain", "success", null, "1 MX host(s)", null)],
+        new InvestigationMetadata(
+            "2.1.0", DateTimeOffset.UtcNow, 5,
+            ["email-domain"], 1, false));
+
     public static AppConfig TestConfig() => new()
     {
         TimeoutSeconds = 5,
@@ -208,7 +258,8 @@ internal static class Sample
         StringWriter? output = null,
         StringWriter? errors = null,
         IProfileEngine? profiles = null,
-        Exception? profileError = null)
+        Exception? profileError = null,
+        IEmailProfileEngine? emailProfiles = null)
     {
         output ??= new StringWriter();
         errors ??= new StringWriter();
@@ -221,6 +272,8 @@ internal static class Sample
             NullLogger.Instance,
             engine,
             detectSelf,
-            profiles ?? new FakeProfileEngine(error: profileError));
+            profiles ?? new FakeProfileEngine(error: profileError),
+            null,
+            emailProfiles ?? new FakeEmailEngine());
     }
 }

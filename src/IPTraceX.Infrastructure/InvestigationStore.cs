@@ -21,7 +21,8 @@ public sealed record InvestigationSummary(
     string Id, DateTimeOffset TimestampUtc, string Target, string ToolVersion);
 
 /// <summary>
-/// File-backed investigation store: investigations/YYYY-MM-DD/IPX-*.json.
+/// File-backed investigation store: investigations/YYYY-MM-DD/*.json
+/// (IPX-* for IPs, EMX-* for emails).
 /// Atomic writes (temp + move), validated IDs only (no traversal),
 /// UTF-8, schema-checked reads. Never stores secrets.
 /// </summary>
@@ -30,7 +31,7 @@ public sealed class FileInvestigationStore : IInvestigationStore
     public const string CurrentSchema = Investigation.CurrentSchema;
 
     private static readonly Regex SafeId =
-        new(@"^IPX-\d{8}-[A-Z0-9]{6}$", RegexOptions.Compiled);
+        new(@"^(IPX|EMX)-\d{8}-[A-Z0-9]{6}$", RegexOptions.Compiled);
 
     private readonly string _root;
 
@@ -113,7 +114,7 @@ public sealed class FileInvestigationStore : IInvestigationStore
         string[] files;
         try
         {
-            files = Directory.GetFiles(_root, "IPX-*.json", SearchOption.AllDirectories);
+            files = Directory.GetFiles(_root, "*.json", SearchOption.AllDirectories);
         }
         catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
         {
@@ -249,20 +250,26 @@ public sealed class FileInvestigationStore : IInvestigationStore
 
     internal static string Serialize(Investigation investigation)
     {
-        var node = (JsonObject?)JsonNode.Parse(GeoJson.ProfileToJsonString(investigation.Profile));
+        JsonObject? node = investigation.Profile is null
+            ? null
+            : (JsonObject?)JsonNode.Parse(GeoJson.ProfileToJsonString(investigation.Profile));
         // Retain per-provider votes so stored investigations keep full evidence.
-        var votes = new JsonArray();
-        foreach (GeoResult vote in investigation.Profile.Geo.Votes)
+        if (node is not null && investigation.Profile is { } profile)
         {
-            JsonObject? voteNode = JsonNode.Parse(GeoJson.ToJsonString(vote))?.AsObject();
-            if (voteNode is not null)
+            var votes = new JsonArray();
+            foreach (GeoResult vote in profile.Geo.Votes)
             {
-                voteNode["source"] = vote.Source;
-                votes.Add(voteNode);
+                JsonObject? voteNode = JsonNode.Parse(GeoJson.ToJsonString(vote))?.AsObject();
+                if (voteNode is not null)
+                {
+                    voteNode["source"] = vote.Source;
+                    votes.Add(voteNode);
+                }
             }
+
+            node["geo_votes"] = votes;
         }
 
-        node!["geo_votes"] = votes;
         var doc = new JsonObject
         {
             ["schema_version"] = CurrentSchema,
@@ -271,7 +278,8 @@ public sealed class FileInvestigationStore : IInvestigationStore
             ["tool_version"] = investigation.ToolVersion,
             ["target"] = investigation.Target,
             ["target_type"] = investigation.TargetType,
-            ["profile"] = node,
+            ["profile"] = node?.DeepClone(),
+            ["email"] = investigation.Email?.DeepClone(),
             ["errors"] = new JsonArray(investigation.Errors.Select(e => (JsonNode)JsonValue.Create(e)!).ToArray()),
         };
         var options = new JsonSerializerOptions { WriteIndented = true };
@@ -282,8 +290,7 @@ public sealed class FileInvestigationStore : IInvestigationStore
     {
         string id = data["id"]?.GetValue<string>() ?? throw new BadResponseException("Missing id.");
         InvestigationId.RequireValid(id);
-        JsonObject profile = data["profile"]?.AsObject()
-            ?? throw new BadResponseException("Missing profile.");
+        JsonObject? profile = data["profile"]?.AsObject();
         var errors = new List<string>();
         if (data["errors"] is JsonArray arr)
         {
@@ -296,6 +303,20 @@ public sealed class FileInvestigationStore : IInvestigationStore
             }
         }
 
+        IntelligenceProfile? rebuilt = null;
+        if (profile is not null)
+        {
+            try
+            {
+                rebuilt = RebuildProfile(profile);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is FormatException
+                || ex is ArgumentException || ex is JsonException)
+            {
+                throw new BadResponseException($"Investigation file is corrupt: {id}.");
+            }
+        }
+
         return new Investigation(
             id,
             DateTimeOffset.Parse(
@@ -303,9 +324,10 @@ public sealed class FileInvestigationStore : IInvestigationStore
             data["tool_version"]?.GetValue<string>() ?? "?",
             data["target"]?.GetValue<string>() ?? "?",
             data["target_type"]?.GetValue<string>() ?? "ip",
-            RebuildProfile(profile),
+            rebuilt,
             errors,
-            data["schema_version"]?.GetValue<string>() ?? CurrentSchema);
+            data["schema_version"]?.GetValue<string>() ?? CurrentSchema,
+            data["email"]?.AsObject());
     }
 
     // Rebuilds the profile subset the app needs (geo/network/dns/security/

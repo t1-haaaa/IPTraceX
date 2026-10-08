@@ -59,7 +59,7 @@ public sealed class LiveProviderTests
             var store = new FileInvestigationStore(dir);
             store.Save(investigation);
             Investigation loaded = store.Get(investigation.Id);
-            Assert.Equal("US", loaded.Profile.Geo.Geolocation.CountryCode);
+            Assert.Equal("US", loaded.Profile!.Geo.Geolocation.CountryCode);
             Assert.NotEmpty(Evidence.BuildMatrix(loaded.Profile));
             Assert.Single(store.List());
         }
@@ -67,5 +67,26 @@ public sealed class LiveProviderTests
         {
             Directory.Delete(dir, true);
         }
+    }
+
+    [SkippableFact]
+    public async Task LiveEmailDomainIntel()
+    {
+        Skip.IfNot(LiveEnabled(), "Set IPTRACEX_LIVE=1 to run live provider tests.");
+        var profiler = new EmailProfiler(Config());
+        EmailProfile profile = await profiler.AnalyzeEmailAsync("user@gmail.com");
+        Assert.Equal("gmail.com", profile.Domain);
+        Assert.NotEmpty(profile.DomainIntel.MxHosts);
+        Assert.Contains(profile.DomainIntel.MxHosts, h => h.Contains("google", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(profile.DomainIntel.SpfRecord);
+        Assert.StartsWith("v=spf1", profile.DomainIntel.SpfRecord, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(profile.DomainIntel.DmarcRecord);
+        Assert.Equal("Google (Gmail / Workspace)", profile.DomainIntel.MailProvider);
+        Assert.Equal("NOT DETECTED", profile.DomainIntel.DisposableStatus);
+        Assert.True(profile.DomainIntel.IsFreeMail);
+        // Avatar unknown is honest when no public avatar exists; only assert shape.
+        Assert.True(profile.Avatar.Status is "FOUND" or "UNKNOWN");
+        // No keys in live output either.
+        Assert.DoesNotContain("Bearer", EmailJson.ToJsonString(profile));
     }
 }

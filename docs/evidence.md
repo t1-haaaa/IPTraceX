@@ -20,6 +20,11 @@ Region      Provider B     Tindouf        CONFLICT
 Shown in investigation view, `--compare` output, reports and JSON
 (`consensus` section carries supporting/conflicting provider lists).
 
+Email mode reuses the same vocabulary: per-field SUPPORT/MISSING rows
+(domain, mail-provider, disposable, avatar, breaches) plus the same
+honesty rule — a missing footprint match is MISSING, never evidence
+of absence, and weak correlations stay LOW.
+
 # Confidence
 
 Confidence is explained, not asserted. Each field reports level, reason,

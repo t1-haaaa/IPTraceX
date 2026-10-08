@@ -27,7 +27,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
 APP="IPTraceX"
-APP_VERSION="2.1.0" # keep in sync with src/IPTraceX.Core/AppInfo.cs
+APP_VERSION="2.2.0" # keep in sync with src/IPTraceX.Core/AppInfo.cs
 ARCHIVE="iptracex-linux-x64.tar.gz"
 
 # Official sources only. Never accept a download URL from the user.

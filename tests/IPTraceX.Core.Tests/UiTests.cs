@@ -73,13 +73,14 @@ public sealed class UiTests
     public void MainMenuNumbering()
     {
         string menu = Formatting.MainMenu(Plain);
-        foreach (string token in new[] { "[01]", "[02]", "[03]", "[04]", "[05]", "[06]", "[07]", "[08]", "[09]", "[00]" })
+        foreach (string token in new[] { "[01]", "[02]", "[03]", "[04]", "[05]", "[06]", "[07]", "[08]", "[09]", "[10]", "[00]" })
         {
             Assert.Contains(token, menu);
         }
 
         Assert.Contains("Analyze IP", menu);
         Assert.Contains("Analyze domain", menu);
+        Assert.Contains("Analyze email", menu);
         Assert.Contains("Investigations", menu);
     }
 

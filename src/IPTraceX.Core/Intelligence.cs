@@ -10,6 +10,9 @@ public enum ProviderCategory
     Cloud,
     Reputation,
     Network,
+    Avatar,
+    Footprint,
+    Breach,
 }
 
 /// <summary>How a signal was observed.</summary>
@@ -46,7 +49,7 @@ public sealed record ProviderOutcome(
     string Status,
     string? Error,
     string Summary,
-    GeoResult? Result);
+    GeoResult? Result = null);
 
 /// <summary>Single anonymity signal with sources and confidence.</summary>
 public sealed record AnonymitySignal(

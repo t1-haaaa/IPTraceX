@@ -7,12 +7,17 @@ namespace IPTraceX.Core;
 public static class InvestigationId
 {
     private static readonly Regex ValidFormat =
-        new(@"^IPX-\d{8}-[A-Z0-9]{6}$", RegexOptions.Compiled);
+        new(@"^(IPX|EMX)-\d{8}-[A-Z0-9]{6}$", RegexOptions.Compiled);
 
     private const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
-    public static string New()
+    public static string New(string prefix = "IPX")
     {
+        if (prefix is not "IPX" and not "EMX")
+        {
+            throw new UsageException($"Invalid investigation prefix: '{prefix}'.");
+        }
+
         byte[] bytes = RandomNumberGenerator.GetBytes(6);
         char[] suffix = new char[6];
         for (int i = 0; i < 6; i++)
@@ -20,7 +25,7 @@ public static class InvestigationId
             suffix[i] = Alphabet[bytes[i] % Alphabet.Length];
         }
 
-        return $"IPX-{DateTimeOffset.UtcNow:yyyyMMdd}-{new string(suffix)}";
+        return $"{prefix}-{DateTimeOffset.UtcNow:yyyyMMdd}-{new string(suffix)}";
     }
 
     public static bool IsValid(string? id)
@@ -83,9 +88,10 @@ public sealed record Investigation(
     string ToolVersion,
     string Target,
     string TargetType,
-    IntelligenceProfile Profile,
+    IntelligenceProfile? Profile,
     IReadOnlyList<string> Errors,
-    string SchemaVersion)
+    string SchemaVersion,
+    System.Text.Json.Nodes.JsonObject? Email = null)
 {
     public const string CurrentSchema = "2.1";
 }

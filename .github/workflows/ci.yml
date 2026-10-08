@@ -38,6 +38,16 @@ jobs:
           ./IPTraceX --version
           ./iptracex.sh --help
           ./iptracex.sh --version
+      - name: Email smoke (public sources only, no keys)
+        run: |
+          ./IPTraceX --json --email user@gmail.com
+          smoke_dir=$(mktemp -d)
+          cp ./IPTraceX "$smoke_dir/"
+          cd "$smoke_dir"
+          ./IPTraceX --email user@gmail.com --report txt
+          ./IPTraceX --email user@gmail.com --investigate
+          ./IPTraceX --list-investigations
+          ./IPTraceX --email-file /dev/null || true
       - name: Launcher behavior tests
         run: |
           chmod +x tests/launcher/run_tests.sh

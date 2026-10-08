@@ -2,7 +2,7 @@ namespace IPTraceX.Core;
 
 /// <summary>
 /// Evidence matrix, explained confidence, timelines and comparisons.
-/// Pure functions over investigations and votes — no I/O, fully testable.
+/// Pure functions over investigations and votes - no I/O, fully testable.
 /// Disagreement is always preserved; reliability never erases evidence.
 /// </summary>
 public static class Evidence
@@ -156,21 +156,73 @@ public static class Evidence
             ["Confidence"] = profile.Geo.Confidence,
         };
 
+    /// <summary>Tracked fields for email timelines and comparisons.</summary>
+    public static IReadOnlyDictionary<string, string?> EmailSnapshot(EmailProfile profile) =>
+        new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["Domain"] = profile.Domain,
+            ["MailProvider"] = profile.DomainIntel.MailProvider,
+            ["MX"] = profile.DomainIntel.MxHosts.Length == 0
+                ? null : string.Join(", ", profile.DomainIntel.MxHosts),
+            ["SPF"] = profile.DomainIntel.SpfRecord is null ? null : "FOUND",
+            ["DMARC"] = profile.DomainIntel.DmarcRecord is null ? null : "FOUND",
+            ["Disposable"] = profile.DomainIntel.DisposableStatus,
+            ["Avatar"] = profile.Avatar.Status,
+            ["Footprint"] = profile.Footprint.Count.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            ["Breaches"] = profile.Breaches.Count.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            ["Risk"] = profile.Risk.Score?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Confidence"] = profile.FieldConfidences.FirstOrDefault(f => f.Field == "domain")?.Confidence,
+        };
+
     /// <summary>Consecutive changes across a time-ordered history.</summary>
     public static List<string> TimelineChanges(IReadOnlyList<Investigation> history)
     {
-        var changes = new List<string>();
         var ordered = history.OrderBy(i => i.TimestampUtc).ToList();
+        var pairs = new List<(DateTimeOffset Timestamp, IReadOnlyDictionary<string, string?> Snap)>();
+        foreach (Investigation item in ordered)
+        {
+            if (item.Profile is not null)
+            {
+                pairs.Add((item.TimestampUtc, Snapshot(item.Profile)));
+            }
+            else if (item.Email is not null)
+            {
+                pairs.Add((item.TimestampUtc, EmailSnapshotFromJson(item.Email)));
+            }
+        }
+
+        return TimelineChangesFrom(pairs);
+    }
+
+    /// <summary>Timeline over email investigations.</summary>
+    public static List<string> EmailTimelineChanges(
+        IReadOnlyList<(DateTimeOffset Timestamp, EmailProfile Profile)> history)
+    {
+        var pairs = history
+            .OrderBy(h => h.Timestamp)
+            .Select(h => (h.Timestamp, (IReadOnlyDictionary<string, string?>)EmailSnapshot(h.Profile)))
+            .ToList();
+        return TimelineChangesFrom(pairs);
+    }
+
+    private static List<string> TimelineChangesFrom(
+        List<(DateTimeOffset Timestamp, IReadOnlyDictionary<string, string?> Snap)> ordered)
+    {
+        var changes = new List<string>();
         for (int index = 1; index < ordered.Count; index++)
         {
-            var before = Snapshot(ordered[index - 1].Profile);
-            var after = Snapshot(ordered[index].Profile);
+            var (beforeTime, before) = (ordered[index - 1].Timestamp, ordered[index - 1].Snap);
+            var (stamp, after) = (ordered[index].Timestamp, ordered[index].Snap);
             foreach (var (field, _) in before)
             {
-                if (!string.Equals(before[field], after[field], StringComparison.Ordinal))
+                if (!string.Equals(before[field], after.TryGetValue(field, out string? v) ? v : null,
+                        StringComparison.Ordinal))
                 {
-                    changes.Add($"{ordered[index].TimestampUtc:yyyy-MM-dd}: {field}: "
-                        + $"{before[field] ?? "—"} → {after[field] ?? "—"}");
+                    string beforeValue = before[field] ?? "-";
+                    string afterValue = after.TryGetValue(field, out string? w) ? w ?? "-" : "-";
+                    changes.Add($"{stamp:yyyy-MM-dd}: {field}: {beforeValue} -> {afterValue}");
                 }
             }
         }
@@ -182,8 +234,41 @@ public static class Evidence
     public static List<(string Field, string? A, string? B, bool Changed)> Compare(
         Investigation first, Investigation second)
     {
-        var a = Snapshot(first.Profile);
-        var b = Snapshot(second.Profile);
+        if (first.Email is not null && second.Email is not null)
+        {
+            return CompareEmailPayloads(first.Email, second.Email);
+        }
+
+        if (first.Profile is null || second.Profile is null)
+        {
+            return CompareSnapshots(
+                new Dictionary<string, string?>(StringComparer.Ordinal),
+                new Dictionary<string, string?>(StringComparer.Ordinal));
+        }
+
+        return CompareSnapshots(Snapshot(first.Profile), Snapshot(second.Profile));
+    }
+
+    /// <summary>IP-to-IP comparison of two fresh profiles.</summary>
+    public static List<(string Field, string? A, string? B, bool Changed)> CompareProfiles(
+        IntelligenceProfile first, IntelligenceProfile second)
+        => CompareSnapshots(Snapshot(first), Snapshot(second));
+
+    /// <summary>Email-to-email comparison of two fresh profiles.</summary>
+    public static List<(string Field, string? A, string? B, bool Changed)> CompareEmailProfiles(
+        EmailProfile first, EmailProfile second)
+        => CompareSnapshots(EmailSnapshot(first), EmailSnapshot(second));
+
+    /// <summary>Email investigation comparison from stored payloads.</summary>
+    public static List<(string Field, string? A, string? B, bool Changed)> CompareEmailPayloads(
+        System.Text.Json.Nodes.JsonObject? first,
+        System.Text.Json.Nodes.JsonObject? second)
+        => CompareSnapshots(EmailSnapshotFromJson(first), EmailSnapshotFromJson(second));
+
+    /// <summary>Generic snapshot diff used by all comparison views.</summary>
+    public static List<(string Field, string? A, string? B, bool Changed)> CompareSnapshots(
+        IReadOnlyDictionary<string, string?> a, IReadOnlyDictionary<string, string?> b)
+    {
         return a.Keys
             .Select(field => (
                 Field: field,
@@ -194,19 +279,79 @@ public static class Evidence
             .ToList();
     }
 
-    /// <summary>IP-to-IP comparison of two fresh profiles.</summary>
-    public static List<(string Field, string? A, string? B, bool Changed)> CompareProfiles(
-        IntelligenceProfile first, IntelligenceProfile second)
+    /// <summary>Email investigation snapshot carrier (avoids JsonObject in Core APIs).</summary>
+    public sealed record JsonEmail(IReadOnlyDictionary<string, string?> Fields);
+
+    public static IReadOnlyDictionary<string, string?> EmailSnapshotFromJson(
+        System.Text.Json.Nodes.JsonObject? email)
     {
-        var a = Snapshot(first);
-        var b = Snapshot(second);
-        return a.Keys
-            .Select(field => (
-                Field: field,
-                A: a[field],
-                B: b.TryGetValue(field, out string? value) ? value : null,
-                Changed: !string.Equals(a[field], b.TryGetValue(field, out string? v) ? v : null,
-                    StringComparison.Ordinal)))
-            .ToList();
+        string Str(System.Text.Json.Nodes.JsonNode? node)
+            => node?.GetValue<string?>() ?? "";
+        string domain = Str(email?["domain"]);
+        string mailProvider = "";
+        string mx = "";
+        string spf = "";
+        string dmarc = "";
+        string disposable = "";
+        if (email?["email_domain"] is System.Text.Json.Nodes.JsonObject ed)
+        {
+            if (ed["mx"] is System.Text.Json.Nodes.JsonArray mxArr)
+            {
+                mx = string.Join(", ", mxArr
+                    .Select(x => x?.GetValue<string?>())
+                    .Where(s => s is not null)
+                    .Cast<string>());
+            }
+        }
+
+        if (email?["dns"] is System.Text.Json.Nodes.JsonObject dns)
+        {
+            disposable = Str(dns["disposable"]);
+            mailProvider = Str(dns["mail_provider"]);
+            spf = Str(dns["spf"]) == "" && email?["email_domain"] is System.Text.Json.Nodes.JsonObject ed2
+                ? (ed2["spf"]?.GetValue<string?>() is string s && s != "" ? "FOUND" : "")
+                : Str(dns["spf"]);
+            dmarc = Str(dns["dmarc"]);
+        }
+
+        string avatar = email?["avatar"] is System.Text.Json.Nodes.JsonObject av
+            ? Str(av["status"]) : "";
+        string footprint = email?["public_footprint"] is System.Text.Json.Nodes.JsonArray fp
+            ? fp.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+        string breaches = "";
+        if (email?["breach_intelligence"] is System.Text.Json.Nodes.JsonArray arr)
+        {
+            breaches = arr.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        string risk = "";
+        if (email?["risk"] is System.Text.Json.Nodes.JsonObject riskNode)
+        {
+            risk = riskNode["score"]?.GetValue<int?>()?.ToString(
+                System.Globalization.CultureInfo.InvariantCulture) ?? "";
+        }
+
+        string confidence = "";
+        if (email?["confidence"] is System.Text.Json.Nodes.JsonArray conf
+            && conf.Count != 0
+            && conf[0] is System.Text.Json.Nodes.JsonObject first)
+        {
+            confidence = Str(first["level"]);
+        }
+
+        return new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["Domain"] = domain,
+            ["MailProvider"] = mailProvider,
+            ["MX"] = mx,
+            ["SPF"] = spf,
+            ["DMARC"] = dmarc,
+            ["Disposable"] = disposable,
+            ["Avatar"] = avatar,
+            ["Footprint"] = footprint,
+            ["Breaches"] = breaches,
+            ["Risk"] = risk,
+            ["Confidence"] = confidence,
+        };
     }
 }

@@ -12,6 +12,236 @@ public static class ReportService
 {
     public static readonly string[] SupportedFormats = ["txt", "json", "html"];
 
+    /// <summary>Save a report for a live email profile.</summary>
+    public static string SaveEmailProfile(
+        EmailProfile profile, string format, string projectRoot)
+    {
+        string normalized = (format ?? "").Trim().ToLowerInvariant();
+        if (!SupportedFormats.Contains(normalized, StringComparer.Ordinal))
+        {
+            throw new UsageException(
+                $"Unsupported report format: '{format}'. Supported: txt, json, html.");
+        }
+
+        string date = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+        string stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss");
+        string fileName = $"iptracex-email-{SafeName(profile.Target)}-{stamp}.{normalized}";
+        string outDir = Path.Combine(projectRoot, "reports", date);
+        Directory.CreateDirectory(outDir);
+        string resolved = SafeResolve(outDir, fileName);
+
+        string content = normalized switch
+        {
+            "json" => EmailJson.ToJsonString(profile, indented: true) + "\n",
+            "html" => ToEmailProfileHtml(profile),
+            _ => ToEmailProfileText(profile),
+        };
+        File.WriteAllText(resolved, content, System.Text.Encoding.UTF8);
+        return resolved;
+    }
+
+    private static string ToEmailProfileText(EmailProfile profile)
+    {
+        static string Clean(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "Unknown";
+            }
+
+            return value.Trim().Replace('\r', ' ').Replace('\n', ' ');
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("IPTraceX Email Investigation Report");
+        sb.AppendLine($"Target       : {Clean(profile.Target)}");
+        sb.AppendLine($"Domain       : {Clean(profile.Domain)}");
+        sb.AppendLine($"Mail Provider: {Clean(profile.DomainIntel.MailProvider)}");
+        sb.AppendLine($"SPF          : {(profile.DomainIntel.SpfRecord is null ? "NOT FOUND" : "FOUND")}");
+        sb.AppendLine($"DMARC        : {(profile.DomainIntel.DmarcRecord is null ? "NOT FOUND" : "FOUND")}");
+        sb.AppendLine($"Disposable   : {Clean(profile.DomainIntel.DisposableStatus)}");
+        sb.Append("Avatar       : ").AppendLine(Clean(profile.Avatar.Status));
+        foreach (FootprintMatch match in profile.Footprint)
+        {
+            sb.Append("  [").Append(Clean(match.Platform)).Append("] ").AppendLine(Clean(match.Url));
+            sb.Append("    ").Append(Clean(match.EvidenceType)).Append(": ").Append(Clean(match.MatchedValue))
+                .Append(" (").Append(Clean(match.Confidence)).AppendLine(")");
+        }
+
+        foreach (BreachInfo breach in profile.Breaches)
+        {
+            sb.Append("  Breach: ").Append(Clean(breach.Name));
+            if (breach.Date is not null)
+            {
+                sb.Append(" (").Append(Clean(breach.Date)).Append(')');
+            }
+
+            sb.AppendLine();
+            if (breach.Categories.Length != 0)
+            {
+                sb.Append("    Categories: ").AppendLine(Clean(string.Join(", ", breach.Categories)));
+            }
+        }
+
+        sb.Append("Risk         : ").Append(profile.Risk.Score?.ToString() ?? "unknown")
+            .Append(" - ").AppendLine(Clean(profile.Risk.Level));
+        foreach (RiskEvidence e in profile.Risk.Evidence)
+        {
+            sb.Append("  +").Append(e.Weight).Append(' ').Append(Clean(e.Indicator))
+                .Append(" [").Append(Clean(e.Severity)).Append("] (").Append(Clean(e.Source)).AppendLine(")");
+        }
+
+        foreach (FieldConfidence field in profile.FieldConfidences)
+        {
+            sb.Append("  ").Append(Clean(field.Field)).Append(": ").Append(Clean(field.Value))
+                .Append(" (").Append(Clean(field.Confidence).ToUpperInvariant()).AppendLine(")");
+            sb.Append("    ").AppendLine(Clean(field.Reason));
+        }
+
+        sb.AppendLine("NOTE: Email intelligence is approximate and limited to public sources.");
+        return sb.ToString();
+    }
+
+    private static string ToEmailProfileHtml(EmailProfile profile)
+    {
+        static string E(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "Unknown");
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+            + "<title>IPTraceX Email Investigation Report</title>\n<style>\n"
+            + "body{background:#0d1117;color:#e6edf3;font-family:monospace;max-width:900px;margin:2em auto;padding:0 1em}\n"
+            + "h1{color:#f0b429}h2{color:#f0b429;border-bottom:1px solid #30363d}\n"
+            + "table{border-collapse:collapse;width:100%;margin-bottom:1em}\n"
+            + "th,td{border:1px solid #30363d;padding:.4em .6em;text-align:left}\n"
+            + "th{color:#79c0ff}\n"
+            + "</style>\n</head>\n<body>\n<h1>IPTraceX Email Investigation Report</h1>\n"
+            + $"<p>Target: {E(profile.Target)}</p>\n<h2>Risk</h2>\n<table>\n"
+            + $"<tr><th>Score</th><td>{E(profile.Risk.Score?.ToString() ?? "unknown")}</td></tr>\n"
+            + $"<tr><th>Level</th><td>{E(profile.Risk.Level)}</td></tr>\n"
+            + "</table>\n<p>Email intelligence is approximate and limited to public sources.</p>\n"
+            + "</body>\n</html>\n");
+        return sb.ToString();
+    }
+
+    /// <summary>Save a report for a stored email investigation payload.</summary>
+    public static string SaveEmailReport(
+        System.Text.Json.Nodes.JsonObject email,
+        string target,
+        string investigationId,
+        string format,
+        string projectRoot)
+    {
+        string normalized = (format ?? "").Trim().ToLowerInvariant();
+        if (!SupportedFormats.Contains(normalized, StringComparer.Ordinal))
+        {
+            throw new UsageException(
+                $"Unsupported report format: '{format}'. Supported: txt, json, html.");
+        }
+
+        string date = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+        string stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss");
+        string fileName = $"iptracex-email-{SafeName(target)}-{stamp}.{normalized}";
+        string outDir = Path.Combine(projectRoot, "reports", date);
+        Directory.CreateDirectory(outDir);
+        string resolved = SafeResolve(outDir, fileName);
+
+        string content = normalized switch
+        {
+            "json" => NormalizeEmailJson(email, investigationId),
+            "html" => ToEmailHtml(email, target, investigationId),
+            _ => ToEmailText(email, target, investigationId),
+        };
+        File.WriteAllText(resolved, content, System.Text.Encoding.UTF8);
+        return resolved;
+    }
+
+    private static string NormalizeEmailJson(
+        System.Text.Json.Nodes.JsonObject email, string investigationId)
+    {
+        var clone = (System.Text.Json.Nodes.JsonObject)email.DeepClone();
+        clone["investigation"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["id"] = investigationId,
+            ["saved"] = true,
+        };
+        var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+        return clone.ToJsonString(options) + "\n";
+    }
+
+    private static string Str(System.Text.Json.Nodes.JsonNode? node)
+        => node?.GetValue<string?>() ?? "Unknown";
+
+    internal static string ToEmailText(
+        System.Text.Json.Nodes.JsonObject email, string target, string investigationId)
+    {
+        var ed = email["email_domain"] as System.Text.Json.Nodes.JsonObject;
+        var dns = email["dns"] as System.Text.Json.Nodes.JsonObject;
+        var av = email["avatar"] as System.Text.Json.Nodes.JsonObject;
+        var risk = email["risk"] as System.Text.Json.Nodes.JsonObject;
+        var lines = new List<string>
+        {
+            "IPTraceX Email Investigation Report",
+            $"Investigation: {investigationId}",
+            $"Target       : {target}",
+            $"Domain       : {Str(email["domain"])}",
+            "",
+            "[1] DOMAIN",
+            $"    MX           : {MxLine(ed)}",
+            $"    Mail Provider: {Str(dns?["mail_provider"])}",
+            $"    SPF          : {(ed?["spf"]?.GetValue<string?>() is string spf && spf != "" ? "FOUND" : "NOT FOUND")}",
+            $"    DMARC        : {(ed?["dmarc"]?.GetValue<string?>() is string dmarc && dmarc != "" ? "FOUND" : "NOT FOUND")}",
+            $"    Disposable   : {Str(dns?["disposable"])}",
+            "",
+            "[2] AVATAR",
+            $"    Status       : {Str(av?["status"])}",
+            "",
+            "[3] RISK",
+            $"    Score        : {(risk?["score"]?.GetValue<int?>() is int score ? $"{score}/100" : "unknown")}",
+            $"    Level        : {Str(risk?["level"])}",
+            "",
+            "NOTE: Email intelligence is approximate and limited to public sources.",
+            "",
+        };
+        return string.Join("\n", lines);
+    }
+
+    private static string MxLine(System.Text.Json.Nodes.JsonObject? ed)
+    {
+        if (ed?["mx"] is not System.Text.Json.Nodes.JsonArray arr || arr.Count == 0)
+        {
+            return "none";
+        }
+
+        return string.Join(", ", arr
+            .Select(x => x?.GetValue<string?>())
+            .Where(s => !string.IsNullOrEmpty(s))
+            .Cast<string>());
+    }
+
+    internal static string ToEmailHtml(
+        System.Text.Json.Nodes.JsonObject email, string target, string investigationId)
+    {
+        static string E(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "Unknown");
+        var ed = email["email_domain"] as System.Text.Json.Nodes.JsonObject;
+        var risk = email["risk"] as System.Text.Json.Nodes.JsonObject;
+        return "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+            + "<title>IPTraceX Email Investigation Report</title>\n<style>\n"
+            + "body{background:#0d1117;color:#e6edf3;font-family:monospace;max-width:900px;margin:2em auto;padding:0 1em}\n"
+            + "h1{color:#f0b429}h2{color:#f0b429;border-bottom:1px solid #30363d}\n"
+            + "table{border-collapse:collapse;width:100%;margin-bottom:1em}\n"
+            + "th,td{border:1px solid #30363d;padding:.4em .6em;text-align:left}\n"
+            + "th{color:#79c0ff}\n"
+            + "</style>\n</head>\n<body>\n<h1>IPTraceX Email Investigation Report</h1>\n"
+            + $"<p>Investigation: {E(investigationId)} · Target: {E(target)}</p>\n"
+            + "<h2>Domain</h2>\n<table>\n"
+            + $"<tr><th>Domain</th><td>{E(email["domain"]?.GetValue<string?>())}</td></tr>\n"
+            + $"<tr><th>MX</th><td>{E(MxLine(ed) == "none" ? null : MxLine(ed))}</td></tr>\n"
+            + "</table>\n<h2>Risk</h2>\n<table>\n"
+            + $"<tr><th>Score</th><td>{E(risk?["score"]?.GetValue<int?>()?.ToString() ?? "unknown")}</td></tr>\n"
+            + $"<tr><th>Level</th><td>{E(risk?["level"]?.GetValue<string?>())}</td></tr>\n"
+            + "</table>\n<p>Email intelligence is approximate and limited to public sources.</p>\n"
+            + "</body>\n</html>\n";
+    }
+
     public static string SaveProfile(
         IntelligenceProfile profile, string format, string projectRoot)
     {

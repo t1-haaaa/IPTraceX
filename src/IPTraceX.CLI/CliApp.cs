@@ -40,6 +40,7 @@ public sealed class CliApp
     private readonly ILogger _logger;
     private readonly IAnalysisEngine _engine;
     private readonly IProfileEngine _profiles;
+    private readonly IEmailProfileEngine _emailProfiles;
     private readonly Infrastructure.IInvestigationStore _store;
     private readonly Func<CancellationToken, Task<string>> _detectSelf;
 
@@ -53,7 +54,8 @@ public sealed class CliApp
         IAnalysisEngine engine,
         Func<CancellationToken, Task<string>>? detectSelf = null,
         IProfileEngine? profileEngine = null,
-        Infrastructure.IInvestigationStore? store = null)
+        Infrastructure.IInvestigationStore? store = null,
+        IEmailProfileEngine? emailProfiles = null)
     {
         _config = config;
         _palette = palette;
@@ -63,6 +65,7 @@ public sealed class CliApp
         _logger = logger;
         _engine = engine;
         _profiles = profileEngine ?? new ProfileEngineAdapter(config);
+        _emailProfiles = emailProfiles ?? new EmailProfileEngineAdapter(config);
         _store = store ?? new Infrastructure.FileInvestigationStore(config.ProjectRoot);
         _detectSelf = detectSelf ?? (ct => Infrastructure.SelfIp.DetectAsync(config.TimeoutSeconds, null, ct));
     }
@@ -88,7 +91,9 @@ public sealed class CliApp
         bool ListInvestigations,
         string? DeleteInvestigation,
         string[] Compare,
-        string[] CompareIp);
+        string[] CompareIp,
+        string? Email,
+        string? EmailFile);
 
     public async Task<int> RunAsync(string[] args, CancellationToken ct = default)
     {
@@ -175,6 +180,70 @@ public sealed class CliApp
         if (opts.CompareIp.Length == 2)
         {
             return await CompareIpsAsync(opts.CompareIp[0], opts.CompareIp[1], ct).ConfigureAwait(false);
+        }
+
+        if (opts.EmailFile is not null)
+        {
+            List<string> lines;
+            try
+            {
+                lines = ReadLinesFromFile(opts.EmailFile);
+            }
+            catch (TraceXException ex)
+            {
+                _error.WriteLine(FriendlyError(ex));
+                return ex.ExitCode;
+            }
+
+            return await RunEmailBatchAsync(lines, opts.Investigate is not null, ct)
+                .ConfigureAwait(false);
+        }
+
+        if (opts.Email is not null)
+        {
+            if (opts.Report is not null)
+            {
+                return await RunEmailReportAsync(opts.Email, opts.Report, ct).ConfigureAwait(false);
+            }
+
+            if (opts.Investigate is not null)
+            {
+                return await RunEmailInvestigateAsync(opts.Email, ct).ConfigureAwait(false);
+            }
+
+            return await RunEmailAsync(opts.Email, opts.Json, ct).ConfigureAwait(false);
+        }
+
+        if (opts.EmailFile is not null)
+        {
+            List<string> lines;
+            try
+            {
+                lines = ReadLinesFromFile(opts.EmailFile);
+            }
+            catch (TraceXException ex)
+            {
+                _error.WriteLine(FriendlyError(ex));
+                return ex.ExitCode;
+            }
+
+            return await RunEmailBatchAsync(lines, opts.Investigate is not null, ct)
+                .ConfigureAwait(false);
+        }
+
+        if (opts.Email is not null)
+        {
+            if (opts.Report is not null)
+            {
+                return await RunEmailReportAsync(opts.Email, opts.Report, ct).ConfigureAwait(false);
+            }
+
+            if (opts.Investigate is not null)
+            {
+                return await RunEmailInvestigateAsync(opts.Email, ct).ConfigureAwait(false);
+            }
+
+            return await RunEmailAsync(opts.Email, opts.Json, ct).ConfigureAwait(false);
         }
 
         if (opts.Investigate is not null && opts.Investigate.Length != 0 && opts.File is null && !opts.Stdin)
@@ -277,6 +346,8 @@ public sealed class CliApp
         string? deleteInvestigation = null;
         var compare = new List<string>();
         var compareIp = new List<string>();
+        string? email = null;
+        string? emailFile = null;
         double? timeout = null;
 
         for (int i = 0; i < args.Length; i++)
@@ -328,6 +399,22 @@ public sealed class CliApp
                     report = args[++i];
                     break;
                 case "--providers": providers = true; break;
+                case "--email":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new UsageException("--email requires an address value.");
+                    }
+
+                    email = args[++i];
+                    break;
+                case "--email-file":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new UsageException("--email-file requires a PATH value.");
+                    }
+
+                    emailFile = args[++i];
+                    break;
                 case "--investigate":
                     if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
                     {
@@ -409,7 +496,8 @@ public sealed class CliApp
 
         return new Options(ip, json, file, stdin, map, self, noColor, debug, timeout, version, help,
             domain, rdns, report, providers, investigate, investigation,
-            listInvestigations, deleteInvestigation, [.. compare], [.. compareIp]);
+            listInvestigations, deleteInvestigation, [.. compare], [.. compareIp],
+            email, emailFile);
     }
 
     public static string HelpText() => string.Join("\n", new[]
@@ -442,6 +530,8 @@ public sealed class CliApp
         "  --delete-investigation ID  Delete a saved investigation.",
         "  --compare ID1 ID2  Compare two investigations.",
         "  --compare-ip A B   Compare two IP addresses directly.",
+        "  --email ADDRESS    Analyze an email address (public OSINT only).",
+        "  --email-file PATH  Batch email analysis, one address per line.",
         "  --no-color         Disable ANSI colors.",
         "  --debug            Verbose technical details.",
         "  --timeout TIMEOUT  Provider timeout in seconds.",
@@ -480,6 +570,8 @@ public sealed class CliApp
     public static string FriendlyError(Exception ex)
         => ex switch
         {
+            InvalidEmailException =>
+                "[ERROR] Invalid email address.\n[!] Please enter a valid email address (user@example.com).",
             NonPublicIpException npe =>
                 $"[!] This is not a public routable IP.\n    {npe.Message}",
             InvalidIpException =>
@@ -727,6 +819,336 @@ public sealed class CliApp
         _output.WriteLine($"    Sources      : {_palette.Data(profile.Dns.Sources.Length == 0 ? "none" : string.Join(", ", profile.Dns.Sources))}");
         _output.WriteLine("");
         return ExitOk;
+    }
+
+    public async Task<int> RunEmailAsync(string raw, bool asJson, CancellationToken ct)
+    {
+        EmailProfile profile;
+        try
+        {
+            EmailValidation.Parse(raw);
+            profile = await _emailProfiles.AnalyzeEmailAsync(raw, null, ct).ConfigureAwait(false);
+            _lastOutcomes.Clear();
+            _lastOutcomes.AddRange(profile.Providers.Select(o => new ProviderOutcome(
+                o.ProviderId, o.Status == "success" ? "success" : "failed", null, o.Summary)));
+        }
+        catch (Exception ex)
+        {
+            if (_config.Debug)
+            {
+                _error.WriteLine(ex.ToString());
+            }
+
+            _error.WriteLine(FriendlyError(ex));
+            return ExitFor(ex);
+        }
+
+        if (asJson)
+        {
+            _output.WriteLine(EmailJson.ToJsonString(profile, indented: true));
+        }
+        else
+        {
+            _output.WriteLine(Formatting.FormatEmailProfile(profile, _palette));
+            await PostEmailMenuAsync(profile, ct).ConfigureAwait(false);
+        }
+
+        return ExitOk;
+    }
+
+    private async Task PostEmailMenuAsync(EmailProfile profile, CancellationToken ct)
+    {
+        while (true)
+        {
+            _output.WriteLine("");
+            _output.WriteLine($"{_palette.TokenInfo()} Email actions");
+            _output.WriteLine("");
+            _output.WriteLine("[1] View evidence");
+            _output.WriteLine("[2] View providers");
+            _output.WriteLine("[3] View domain intelligence");
+            _output.WriteLine("[4] Generate report");
+            _output.WriteLine("[5] Save investigation");
+            _output.WriteLine("[0] Back");
+            _output.WriteLine("");
+            _output.WriteLine($"{_palette.TokenAsk()} Select an option:");
+            string? choice;
+            try
+            {
+                _output.Write($"{_palette.TokenIn()} ");
+                _output.Flush();
+                choice = (await _input.ReadLineAsync(ct).ConfigureAwait(false))?.Trim();
+            }
+            catch (Exception ex) when (ex is IOException || ex is OperationCanceledException
+                || ex is InvalidOperationException || ex is ObjectDisposedException)
+            {
+                _output.WriteLine("\nBye.");
+                return;
+            }
+
+            if (choice is null)
+            {
+                _output.WriteLine("\nBye.");
+                return;
+            }
+
+            if (choice is "1" or "01")
+            {
+                _output.WriteLine(Formatting.FormatEmailEvidence(profile, _palette));
+                continue;
+            }
+
+            if (choice is "2" or "02")
+            {
+                foreach (ProviderOutcome outcome in profile.Providers)
+                {
+                    _output.WriteLine($"    {_palette.Data(outcome.ProviderId.PadRight(14))} : {outcome.Status}"
+                        + (outcome.Error is null ? "" : $" ({outcome.Error})"));
+                }
+
+                continue;
+            }
+
+            if (choice is "3" or "03")
+            {
+                _output.WriteLine(Formatting.FormatEmailDomain(profile, _palette));
+                continue;
+            }
+
+            if (choice is "4" or "04")
+            {
+                string? format = await PromptAsync(
+                    $"{_palette.TokenAsk()} Format (txt/json/html):\n{_palette.TokenIn()} ", ct)
+                    .ConfigureAwait(false);
+                if (format is null)
+                {
+                    _output.WriteLine("\nBye.");
+                    return;
+                }
+
+                await RunEmailReportAsync(profile.Target, format, ct).ConfigureAwait(false);
+                continue;
+            }
+
+            if (choice is "5" or "05")
+            {
+                SaveEmailInvestigation(profile);
+                continue;
+            }
+
+            if (choice is "0" or "00")
+            {
+                return;
+            }
+
+            _output.WriteLine("[?] Unknown option. Choose 1-5 or 0.");
+        }
+    }
+
+    private void SaveEmailInvestigation(EmailProfile profile)
+    {
+        try
+        {
+            var errors = profile.Providers
+                .Where(o => o.Status != "success")
+                .Select(o => $"{o.ProviderId}: {o.Error ?? "failed"}")
+                .ToList();
+            var investigation = new Investigation(
+                InvestigationId.New("EMX"),
+                DateTimeOffset.UtcNow,
+                AppInfo.Version,
+                profile.Target,
+                "email",
+                null,
+                errors,
+                Investigation.CurrentSchema,
+                EmailJson.FromEmailProfile(profile));
+            _store.Save(investigation);
+            _output.WriteLine($"[+] Investigation saved: {investigation.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+        }
+    }
+
+    public async Task<int> RunEmailInvestigateAsync(string raw, CancellationToken ct)
+    {
+        EmailProfile profile;
+        try
+        {
+            EmailValidation.Parse(raw);
+            profile = await _emailProfiles.AnalyzeEmailAsync(raw, null, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            if (_config.Debug)
+            {
+                _error.WriteLine(ex.ToString());
+            }
+
+            _error.WriteLine(FriendlyError(ex));
+            return ExitFor(ex);
+        }
+
+        try
+        {
+            var errors = profile.Providers
+                .Where(o => o.Status != "success")
+                .Select(o => $"{o.ProviderId}: {o.Error ?? "failed"}")
+                .ToList();
+            var investigation = new Investigation(
+                InvestigationId.New("EMX"),
+                DateTimeOffset.UtcNow,
+                AppInfo.Version,
+                profile.Target,
+                "email",
+                null,
+                errors,
+                Investigation.CurrentSchema,
+                EmailJson.FromEmailProfile(profile));
+            _store.Save(investigation);
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ex is TraceXException tx ? tx.ExitCode : ExitGeneral;
+        }
+
+        _output.WriteLine(Formatting.FormatEmailProfile(profile, _palette));
+        return ExitOk;
+    }
+
+    public async Task<int> RunEmailBatchAsync(
+        IEnumerable<string> items, bool save, CancellationToken ct)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unique = new List<string>();
+        foreach (string raw in items)
+        {
+            string text = raw.Trim();
+            if (text.Length == 0 || text.StartsWith('#'))
+            {
+                continue;
+            }
+
+            if (seen.Add(text.ToLowerInvariant()))
+            {
+                unique.Add(text);
+            }
+        }
+
+        if (unique.Count == 0)
+        {
+            _error.WriteLine("[ERROR] No email addresses found in input.");
+            return ExitUsage;
+        }
+
+        _output.WriteLine($"{_palette.TokenInfo()} Processing {unique.Count} email addresses...");
+        _output.WriteLine("");
+        int ok = 0, failed = 0, invalid = 0, index = 0;
+        foreach (string candidate in unique)
+        {
+            index++;
+            ct.ThrowIfCancellationRequested();
+            _output.WriteLine($"{Formatting.BatchItem(_palette, index)} {candidate}");
+            EmailProfile profile;
+            try
+            {
+                EmailValidation.Parse(candidate);
+                profile = await _emailProfiles.AnalyzeEmailAsync(candidate, null, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (InvalidEmailException)
+            {
+                _output.WriteLine("[!] Invalid email address.\n");
+                invalid++;
+                failed++;
+                continue;
+            }
+            catch (Exception)
+            {
+                _output.WriteLine("[ERROR] Unexpected error for this address.\n");
+                failed++;
+                continue;
+            }
+
+            _output.WriteLine(Formatting.FormatEmailSummary(profile, _palette));
+            if (save)
+            {
+                try
+                {
+                    var errors = profile.Providers
+                        .Where(o => o.Status != "success")
+                        .Select(o => $"{o.ProviderId}: {o.Error ?? "failed"}")
+                        .ToList();
+                    var investigation = new Investigation(
+                        InvestigationId.New("EMX"),
+                        DateTimeOffset.UtcNow,
+                        AppInfo.Version,
+                        profile.Target,
+                        "email",
+                        null,
+                        errors,
+                        Investigation.CurrentSchema,
+                        EmailJson.FromEmailProfile(profile));
+                    _store.Save(investigation);
+                    _output.WriteLine($"[+] Investigation saved: {investigation.Id}");
+                    ok++;
+                }
+                catch (Exception ex)
+                {
+                    _error.WriteLine(FriendlyError(ex));
+                    failed++;
+                }
+            }
+            else
+            {
+                ok++;
+            }
+        }
+
+        _output.WriteLine($"{_palette.TokenInfo()} Processed: {unique.Count}");
+        _output.WriteLine($"{_palette.TokenInfo()} Valid: {ok}");
+        _output.WriteLine($"{_palette.TokenInfo()} Invalid: {invalid}");
+        if (save)
+        {
+            _output.WriteLine($"{_palette.TokenInfo()} Investigations: {ok}");
+        }
+
+        return failed == 0 ? ExitOk : ExitGeneral;
+    }
+
+    public async Task<int> RunEmailReportAsync(string raw, string format, CancellationToken ct)
+    {
+        EmailProfile profile;
+        try
+        {
+            EmailValidation.Parse(raw);
+            profile = await _emailProfiles.AnalyzeEmailAsync(raw, null, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            if (_config.Debug)
+            {
+                _error.WriteLine(ex.ToString());
+            }
+
+            _error.WriteLine(FriendlyError(ex));
+            return ExitFor(ex);
+        }
+
+        try
+        {
+            string path = Infrastructure.ReportService.SaveEmailProfile(
+                profile, format, _config.ProjectRoot);
+            _output.WriteLine($"[+] Report saved to {path}");
+            return ExitOk;
+        }
+        catch (TraceXException ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ex.ExitCode;
+        }
     }
 
     public int ShowProviders()
@@ -1196,23 +1618,23 @@ public sealed class CliApp
                     break;
                 case "3":
                 case "03":
-                    await SelfFlowAsync(ct).ConfigureAwait(false);
+                    await AnalyzeEmailFlowAsync(ct).ConfigureAwait(false);
                     break;
                 case "4":
                 case "04":
-                    await ReverseDnsFlowAsync(ct).ConfigureAwait(false);
+                    await SelfFlowAsync(ct).ConfigureAwait(false);
                     break;
                 case "5":
                 case "05":
-                    ShowProviders();
+                    await ReverseDnsFlowAsync(ct).ConfigureAwait(false);
                     break;
                 case "6":
                 case "06":
-                    await BatchFileFlowAsync(ct).ConfigureAwait(false);
+                    ShowProviders();
                     break;
                 case "7":
                 case "07":
-                    await InvestigationReportFlowAsync(ct).ConfigureAwait(false);
+                    await BatchFileFlowAsync(ct).ConfigureAwait(false);
                     break;
                 case "8":
                 case "08":
@@ -1220,6 +1642,9 @@ public sealed class CliApp
                     break;
                 case "9":
                 case "09":
+                    await InvestigationReportFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "10":
                     ShowConfiguration();
                     break;
                 case "0":
@@ -1227,7 +1652,7 @@ public sealed class CliApp
                     _output.WriteLine("Bye.");
                     return ExitOk;
                 default:
-                    _output.WriteLine("[?] Unknown option. Choose 01-09 or 00.");
+                    _output.WriteLine("[?] Unknown option. Choose 01-10 or 00.");
                     break;
             }
         }
@@ -1407,8 +1832,14 @@ public sealed class CliApp
 
         try
         {
-            string path = Infrastructure.ReportService.SaveProfile(
-                investigation.Profile, format, _config.ProjectRoot);
+            string path = investigation.Email is not null
+                ? Infrastructure.ReportService.SaveEmailReport(
+                    investigation.Email, investigation.Target, investigation.Id,
+                    format, _config.ProjectRoot)
+                : investigation.Profile is not null
+                    ? Infrastructure.ReportService.SaveProfile(
+                        investigation.Profile, format, _config.ProjectRoot)
+                    : throw new UsageException("Investigation has no reportable data.");
             _output.WriteLine($"[+] Report saved to {path}");
         }
         catch (Exception ex)
@@ -1490,6 +1921,26 @@ public sealed class CliApp
             _error.WriteLine(FriendlyError(ex));
             return null;
         }
+    }
+
+    private async Task AnalyzeEmailFlowAsync(CancellationToken ct)
+    {
+        string? raw = await PromptAsync(
+            $"{_palette.TokenAsk()} Enter email address:\n{_palette.TokenIn()} ", ct)
+            .ConfigureAwait(false);
+        if (raw is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        if (raw.Length == 0)
+        {
+            _error.WriteLine("[ERROR] Empty email address.");
+            return;
+        }
+
+        await RunEmailAsync(raw, false, ct).ConfigureAwait(false);
     }
 
     private async Task AnalyzeDomainFlowAsync(CancellationToken ct)

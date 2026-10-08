@@ -315,7 +315,7 @@ public sealed class CliTests
         var (app, output, _) = Make(new FakeEngine(), "00\n");
         Assert.Equal(0, await app.RunInteractiveAsync(default));
         string text = output.ToString();
-        foreach (string token in new[] { "[01]", "[02]", "[03]", "[04]", "[05]", "[06]", "[07]", "[08]", "[09]", "[00]" })
+        foreach (string token in new[] { "[01]", "[02]", "[03]", "[04]", "[05]", "[06]", "[07]", "[08]", "[09]", "[10]", "[00]" })
         {
             Assert.Contains(token, text);
         }

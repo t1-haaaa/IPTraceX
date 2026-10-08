@@ -19,6 +19,9 @@ public class InvalidIpException(string message) : TraceXException(message)
 
 public sealed class NonPublicIpException(string message) : InvalidIpException(message);
 
+/// <summary>Malformed email input (exit code 3, same usage class as bad IPs).</summary>
+public sealed class InvalidEmailException(string message) : InvalidIpException(message);
+
 public class ProviderException(string message) : TraceXException(message)
 {
     public override int ExitCode => 4;
