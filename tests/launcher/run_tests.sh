@@ -117,7 +117,7 @@ t_header_content() {
   local out
   out="$(print_header "Ready")"
   if [[ "$out" == *"MULTI-PROVIDER IP INTELLIGENCE"* \
-    && "$out" == *"Version 1.0.0"* \
+    && "$out" == *"Version 1.1.0"* \
     && "$out" == *"Developer: t1_haaa"* \
     && "$out" == *"Status: Ready"* ]]; then
     pass "header has logo, version and developer"
