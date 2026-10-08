@@ -172,7 +172,8 @@ export async function queryEvents(f: EventFilter): Promise<StoredEvent[]> {
   }
   if (f.search) {
     params.push(`%${f.search}%`);
-    where.push(`(message ILIKE $${params.length} OR event_type ILIKE $${params.length})`);
+    const p = `$${params.length}`;
+    where.push(`(message ILIKE ${p} OR event_type ILIKE ${p} OR target_reference ILIKE ${p} OR investigation_id ILIKE ${p} OR provider ILIKE ${p} OR correlation_id ILIKE ${p} OR session_id ILIKE ${p} OR status ILIKE ${p})`);
   }
   const limit = Math.min(Math.max(f.limit ?? 100, 1), 500);
   params.push(limit);
