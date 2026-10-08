@@ -196,15 +196,29 @@ public sealed class CliApp
         Audit(AuditEventTypes.ApplicationExit, operation: "shutdown",
             correlationId: correlation, status: exit.ToString(),
             durationMs: clock.ElapsedMilliseconds);
+        Shutdown();
+
+        return exit;
+    }
+
+    /// <summary>Graceful shutdown: deliver queued audit events, then stop.</summary>
+    public void Shutdown()
+    {
         try
         {
-            _audit.Flush(TimeSpan.FromSeconds(5));
+            _audit.Flush(TimeSpan.FromSeconds(20));
         }
         catch (Exception)
         {
         }
 
-        return exit;
+        try
+        {
+            _audit.Dispose();
+        }
+        catch (Exception)
+        {
+        }
     }
 
     private static string DescribeArgs(string[] args)
