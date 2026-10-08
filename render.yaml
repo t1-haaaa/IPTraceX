@@ -2,6 +2,12 @@
 # Deploy: connect the repo in Render → New → Blueprint → select render.yaml.
 # Secrets (sync: false) are entered in the Render dashboard, never committed.
 #
+# Free-tier notes: preDeployCommand is unsupported on free web services, so
+# the idempotent migration runs as part of startCommand instead
+# (`npm run migrate && npm start`) — a failed migration blocks startup.
+# Free Postgres sleeps/expires per Render policy; add billing and switch
+# plans for hardened production.
+#
 # No worker service: audit shipping runs inside each CLI process (bounded
 # async queue); the web service has no background jobs to extract.
 # No cron service: no scheduled tasks exist (CLI log retention is local).
@@ -11,9 +17,9 @@ services:
     name: iptracex-dashboard
     runtime: node
     rootDir: apps/dashboard
+    plan: free
     buildCommand: npm ci && npm run build
-    preDeployCommand: npm run migrate
-    startCommand: npm start
+    startCommand: npm run migrate && npm start
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
@@ -36,4 +42,4 @@ databases:
   - name: iptracex-db
     databaseName: iptracex
     user: iptracex
-    plan: starter
+    plan: free

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateIngestBody, MAX_BODY_BYTES } from "@/lib/events";
-import { storeEvents, StoredEvent } from "@/lib/store";
-import { checkIngestAuth, rateLimited } from "@/lib/auth";
+import { validateIngestBody, MAX_BODY_BYTES } from "../../../../lib/events";
+import { storeEvents, StoredEvent } from "../../../../lib/store";
+import { checkIngestAuth, rateLimited } from "../../../../lib/auth";
 
 export async function POST(req: NextRequest) {
   const ip =

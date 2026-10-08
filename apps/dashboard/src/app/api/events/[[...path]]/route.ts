@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { queryEvents, getEvent, metrics, EventFilter } from "@/lib/store";
-import { getSession } from "@/lib/auth";
+import { queryEvents, getEvent, metrics, EventFilter } from "../../../../lib/store";
+import { getSession } from "../../../../lib/auth";
 import { cookies } from "next/headers";
 
 function session() {
