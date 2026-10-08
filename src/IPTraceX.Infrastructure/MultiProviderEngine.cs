@@ -50,7 +50,13 @@ public sealed class MultiProviderEngine
                 {
                     GeoResult result = ResultFromJson(validated.Text, cached, provider.Name);
                     successes.Add(result);
-                    details.Add(new ProviderDetail { Name = provider.Name, Status = "success" });
+                    details.Add(new ProviderDetail
+                    {
+                        Name = provider.Name,
+                        Status = "success",
+                        Freshness = "CACHED",
+                        AgeSeconds = FileCache.GetAgeSeconds(validated.Text, _config.CacheTtlSeconds, ns),
+                    });
                     onStage?.Invoke($"cached:{provider.Name}");
                     continue;
                 }
@@ -68,7 +74,12 @@ public sealed class MultiProviderEngine
                     .ConfigureAwait(false);
                 result.Source = provider.Name;
                 successes.Add(result);
-                details.Add(new ProviderDetail { Name = provider.Name, Status = "success" });
+                details.Add(new ProviderDetail
+                {
+                    Name = provider.Name,
+                    Status = "success",
+                    Freshness = "LIVE",
+                });
                 try
                 {
                     FileCache.Put(validated.Text, GeoJson.FromResult(result), _config.CacheTtlSeconds, ns);
@@ -123,6 +134,7 @@ public sealed class MultiProviderEngine
         final.Providers.AddRange(details);
         final.ProvidersQueried = details.Count;
         final.ProvidersSuccessful = successes.Count;
+        final.Votes.AddRange(successes);
         onStage?.Invoke("done");
         return final;
     }

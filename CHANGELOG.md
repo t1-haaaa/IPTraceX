@@ -5,6 +5,21 @@ Format follows Keep a Changelog; versions follow SemVer.
 
 ## Unreleased
 
+## 2.1.0 — 2026-10-08
+
+- feat: investigations (IPX-IDs, file store with atomic writes, open/
+  list/delete/compare/timeline, batch integration, interactive submenu).
+- feat: evidence matrix (SUPPORT/CONFLICT/MISSING/ERROR/CACHED) and
+  explained per-field confidence with reasons and provider lists.
+- feat: source reliability tiers (display + tie-break only).
+- feat: freshness metadata (LIVE/CACHED + age) on provider details.
+- feat: risk evidence confidence; reports embed ID/evidence/timeline.
+- feat: JSON `schema_version` 2.1 plus `target`, `dns`, `security`,
+  `risk`, `asn`, `consensus`, `metadata` sections (legacy keys frozen).
+- feat: `--investigate`, `--investigation`, `--list-investigations`,
+  `--delete-investigation`, `--compare`, `--compare-ip`, redesigned
+  main menu with investigations + configuration entries.
+
 ## 1.1.0 — 2026-10-08
 
 - feat: IP Intelligence 2.0 — full profiles (ASN, DNS, anonymity, risk),

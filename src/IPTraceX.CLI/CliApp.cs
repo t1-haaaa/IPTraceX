@@ -1,4 +1,5 @@
 using IPTraceX.Core;
+using IPTraceX.Infrastructure;
 using IPTraceX.Infrastructure.Providers;
 using Microsoft.Extensions.Logging;
 
@@ -39,6 +40,7 @@ public sealed class CliApp
     private readonly ILogger _logger;
     private readonly IAnalysisEngine _engine;
     private readonly IProfileEngine _profiles;
+    private readonly Infrastructure.IInvestigationStore _store;
     private readonly Func<CancellationToken, Task<string>> _detectSelf;
 
     public CliApp(
@@ -50,7 +52,8 @@ public sealed class CliApp
         ILogger logger,
         IAnalysisEngine engine,
         Func<CancellationToken, Task<string>>? detectSelf = null,
-        IProfileEngine? profileEngine = null)
+        IProfileEngine? profileEngine = null,
+        Infrastructure.IInvestigationStore? store = null)
     {
         _config = config;
         _palette = palette;
@@ -60,6 +63,7 @@ public sealed class CliApp
         _logger = logger;
         _engine = engine;
         _profiles = profileEngine ?? new ProfileEngineAdapter(config);
+        _store = store ?? new Infrastructure.FileInvestigationStore(config.ProjectRoot);
         _detectSelf = detectSelf ?? (ct => Infrastructure.SelfIp.DetectAsync(config.TimeoutSeconds, null, ct));
     }
 
@@ -78,7 +82,13 @@ public sealed class CliApp
         string? Domain,
         string? Rdns,
         string? Report,
-        bool Providers);
+        bool Providers,
+        string? Investigate,
+        string? Investigation,
+        bool ListInvestigations,
+        string? DeleteInvestigation,
+        string[] Compare,
+        string[] CompareIp);
 
     public async Task<int> RunAsync(string[] args, CancellationToken ct = default)
     {
@@ -108,6 +118,11 @@ public sealed class CliApp
         if (opts.Stdin)
         {
             string data = await _input.ReadToEndAsync(ct).ConfigureAwait(false);
+            if (opts.Investigate is not null)
+            {
+                return await RunBatchInvestigateAsync(SplitLines(data), ct).ConfigureAwait(false);
+            }
+
             return await RunBatchAsync(SplitLines(data), ct).ConfigureAwait(false);
         }
 
@@ -124,12 +139,47 @@ public sealed class CliApp
                 return ex.ExitCode;
             }
 
+            if (opts.Investigate is not null)
+            {
+                return await RunBatchInvestigateAsync(lines, ct).ConfigureAwait(false);
+            }
+
             return await RunBatchAsync(lines, ct).ConfigureAwait(false);
         }
 
         if (opts.Providers)
         {
             return ShowProviders();
+        }
+
+        if (opts.ListInvestigations)
+        {
+            return ListInvestigations();
+        }
+
+        if (opts.DeleteInvestigation is not null)
+        {
+            return DeleteInvestigation(opts.DeleteInvestigation);
+        }
+
+        if (opts.Investigation is not null)
+        {
+            return ShowInvestigation(opts.Investigation);
+        }
+
+        if (opts.Compare.Length == 2)
+        {
+            return CompareInvestigations(opts.Compare[0], opts.Compare[1]);
+        }
+
+        if (opts.CompareIp.Length == 2)
+        {
+            return await CompareIpsAsync(opts.CompareIp[0], opts.CompareIp[1], ct).ConfigureAwait(false);
+        }
+
+        if (opts.Investigate is not null && opts.Investigate.Length != 0 && opts.File is null && !opts.Stdin)
+        {
+            return await RunInvestigateAsync(opts.Investigate, ct).ConfigureAwait(false);
         }
 
         if (opts.Map)
@@ -217,10 +267,16 @@ public sealed class CliApp
         bool json = false, stdin = false, map = false, self = false;
         bool noColor = false, debug = false, version = false, help = false;
         bool providers = false;
+        bool listInvestigations = false;
         string? file = null;
         string? domain = null;
         string? rdns = null;
         string? report = null;
+        string? investigate = null;
+        string? investigation = null;
+        string? deleteInvestigation = null;
+        var compare = new List<string>();
+        var compareIp = new List<string>();
         double? timeout = null;
 
         for (int i = 0; i < args.Length; i++)
@@ -272,6 +328,52 @@ public sealed class CliApp
                     report = args[++i];
                     break;
                 case "--providers": providers = true; break;
+                case "--investigate":
+                    if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                    {
+                        investigate = args[++i];
+                    }
+                    else
+                    {
+                        investigate = "";
+                    }
+
+                    break;
+                case "--investigation":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new UsageException("--investigation requires an ID value.");
+                    }
+
+                    investigation = args[++i];
+                    break;
+                case "--list-investigations": listInvestigations = true; break;
+                case "--delete-investigation":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new UsageException("--delete-investigation requires an ID value.");
+                    }
+
+                    deleteInvestigation = args[++i];
+                    break;
+                case "--compare":
+                    if (i + 2 >= args.Length)
+                    {
+                        throw new UsageException("--compare requires two investigation IDs.");
+                    }
+
+                    compare.Add(args[++i]);
+                    compare.Add(args[++i]);
+                    break;
+                case "--compare-ip":
+                    if (i + 2 >= args.Length)
+                    {
+                        throw new UsageException("--compare-ip requires two IP addresses.");
+                    }
+
+                    compareIp.Add(args[++i]);
+                    compareIp.Add(args[++i]);
+                    break;
                 case "--timeout":
                     if (i + 1 >= args.Length)
                     {
@@ -306,7 +408,8 @@ public sealed class CliApp
         }
 
         return new Options(ip, json, file, stdin, map, self, noColor, debug, timeout, version, help,
-            domain, rdns, report, providers);
+            domain, rdns, report, providers, investigate, investigation,
+            listInvestigations, deleteInvestigation, [.. compare], [.. compareIp]);
     }
 
     public static string HelpText() => string.Join("\n", new[]
@@ -333,6 +436,12 @@ public sealed class CliApp
         "  --rdns IP          Reverse-DNS lookup only.",
         "  --report FORMAT    Save an investigation report (txt, json, html).",
         "  --providers        List providers with health and capability notes.",
+        "  --investigate [IP] Analyze and save an investigation (or save batch).",
+        "  --investigation ID Show a saved investigation.",
+        "  --list-investigations  List saved investigations.",
+        "  --delete-investigation ID  Delete a saved investigation.",
+        "  --compare ID1 ID2  Compare two investigations.",
+        "  --compare-ip A B   Compare two IP addresses directly.",
         "  --no-color         Disable ANSI colors.",
         "  --debug            Verbose technical details.",
         "  --timeout TIMEOUT  Provider timeout in seconds.",
@@ -633,6 +742,218 @@ public sealed class CliApp
         return ExitOk;
     }
 
+    private Investigation BuildInvestigation(string target, string targetType, IntelligenceProfile profile)
+    {
+        var errors = profile.Providers
+            .Where(o => o.Status != "success")
+            .Select(o => $"{o.ProviderId}: {o.Error ?? "failed"}")
+            .ToList();
+        return new Investigation(
+            InvestigationId.New(),
+            DateTimeOffset.UtcNow,
+            AppInfo.Version,
+            target,
+            targetType,
+            profile,
+            errors,
+            Investigation.CurrentSchema);
+    }
+
+    public async Task<int> RunInvestigateAsync(string ipText, CancellationToken ct)
+    {
+        IntelligenceProfile? profile = await AnalyzeProfileAsync(ipText, null, ct)
+            .ConfigureAwait(false);
+        if (profile is null)
+        {
+            return ExitGeneral;
+        }
+
+        Investigation investigation;
+        try
+        {
+            investigation = BuildInvestigation(profile.Geo.Ip, "ip", profile);
+            _store.Save(investigation);
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ex is TraceXException tx ? tx.ExitCode : ExitGeneral;
+        }
+
+        _output.WriteLine($"[+] Investigation saved: {investigation.Id}");
+        _output.WriteLine(Formatting.FormatProfile(profile, _palette));
+        return ExitOk;
+    }
+
+    public async Task<int> RunBatchInvestigateAsync(IEnumerable<string> items, CancellationToken ct)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unique = new List<string>();
+        foreach (string raw in items)
+        {
+            string text = raw.Trim();
+            if (text.Length == 0 || text.StartsWith('#'))
+            {
+                continue;
+            }
+
+            if (seen.Add(text))
+            {
+                unique.Add(text);
+            }
+        }
+
+        if (unique.Count == 0)
+        {
+            _error.WriteLine("[ERROR] No IP addresses found in input.");
+            return ExitUsage;
+        }
+
+        _output.WriteLine(Formatting.BatchHeader(_palette, unique.Count));
+        _output.WriteLine("");
+        int ok = 0, failed = 0, index = 0;
+        foreach (string candidate in unique)
+        {
+            index++;
+            ct.ThrowIfCancellationRequested();
+            _output.WriteLine($"{Formatting.BatchItem(_palette, index)} {candidate}");
+            IntelligenceProfile? profile = await AnalyzeProfileAsync(candidate, null, ct)
+                .ConfigureAwait(false);
+            if (profile is null)
+            {
+                failed++;
+                continue;
+            }
+
+            try
+            {
+                Investigation investigation = BuildInvestigation(profile.Geo.Ip, "ip", profile);
+                _store.Save(investigation);
+                _output.WriteLine($"[+] Investigation saved: {investigation.Id}\n");
+                ok++;
+            }
+            catch (Exception ex)
+            {
+                _error.WriteLine(FriendlyError(ex));
+                failed++;
+            }
+        }
+
+        _output.WriteLine(Formatting.BatchSummary(_palette, ok, failed));
+        return failed == 0 ? ExitOk : ExitGeneral;
+    }
+
+    public int ListInvestigations()
+    {
+        IReadOnlyList<InvestigationSummary> items;
+        try
+        {
+            items = _store.List();
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ExitGeneral;
+        }
+
+        if (items.Count == 0)
+        {
+            _output.WriteLine("[::] No saved investigations.");
+            return ExitOk;
+        }
+
+        _output.WriteLine("");
+        _output.WriteLine($"{_palette.TokenOk()} {_palette.Brand("INVESTIGATIONS")}");
+        foreach (InvestigationSummary item in items)
+        {
+            _output.WriteLine($"    {_palette.Data(item.Id)}  {item.TimestampUtc:yyyy-MM-dd HH:mm}  {item.Target}");
+        }
+
+        _output.WriteLine("");
+        return ExitOk;
+    }
+
+    public int DeleteInvestigation(string id)
+    {
+        try
+        {
+            _store.Delete(id);
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ex is TraceXException tx ? tx.ExitCode : ExitGeneral;
+        }
+
+        _output.WriteLine($"[+] Deleted investigation {id.Trim()}.");
+        return ExitOk;
+    }
+
+    public int ShowInvestigation(string id)
+    {
+        Investigation investigation;
+        try
+        {
+            investigation = _store.Get(id);
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ex is TraceXException tx ? tx.ExitCode : ExitGeneral;
+        }
+
+        _output.WriteLine(Formatting.FormatInvestigation(investigation, _palette));
+        IReadOnlyList<Investigation> history;
+        try
+        {
+            history = _store.HistoryFor(investigation.Target);
+        }
+        catch (Exception)
+        {
+            history = [];
+        }
+
+        if (history.Count > 1)
+        {
+            _output.WriteLine(Formatting.FormatTimeline(history, _palette));
+        }
+
+        return ExitOk;
+    }
+
+    public int CompareInvestigations(string firstId, string secondId)
+    {
+        Investigation first, second;
+        try
+        {
+            first = _store.Get(firstId);
+            second = _store.Get(secondId);
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return ex is TraceXException tx ? tx.ExitCode : ExitGeneral;
+        }
+
+        _output.WriteLine(Formatting.FormatComparison(first, second, _palette));
+        return ExitOk;
+    }
+
+    public async Task<int> CompareIpsAsync(string firstIp, string secondIp, CancellationToken ct)
+    {
+        IntelligenceProfile? first = await AnalyzeProfileAsync(firstIp, null, ct)
+            .ConfigureAwait(false);
+        IntelligenceProfile? second = await AnalyzeProfileAsync(secondIp, null, ct)
+            .ConfigureAwait(false);
+        if (first is null || second is null)
+        {
+            return ExitGeneral;
+        }
+
+        _output.WriteLine(Formatting.FormatProfileComparison(first, second, _palette));
+        return ExitOk;
+    }
+
     public async Task<int> RunSingleAsync(string ipText, bool asJson, CancellationToken ct)
     {
         GeoResult info;
@@ -895,6 +1216,10 @@ public sealed class CliApp
                     break;
                 case "8":
                 case "08":
+                    await InvestigationsMenuFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "9":
+                case "09":
                     ShowConfiguration();
                     break;
                 case "0":
@@ -902,10 +1227,208 @@ public sealed class CliApp
                     _output.WriteLine("Bye.");
                     return ExitOk;
                 default:
-                    _output.WriteLine("[?] Unknown option. Choose 01-08 or 00.");
+                    _output.WriteLine("[?] Unknown option. Choose 01-09 or 00.");
                     break;
             }
         }
+    }
+
+    private async Task InvestigationsMenuFlowAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            _output.WriteLine(Formatting.InvestigationsMenu(_palette));
+            string? choice;
+            try
+            {
+                _output.Write($"{_palette.TokenIn()} ");
+                _output.Flush();
+                choice = (await _input.ReadLineAsync(ct).ConfigureAwait(false))?.Trim();
+            }
+            catch (Exception ex) when (ex is IOException || ex is OperationCanceledException
+                || ex is InvalidOperationException || ex is ObjectDisposedException)
+            {
+                _output.WriteLine("\nBye.");
+                return;
+            }
+
+            if (choice is null)
+            {
+                _output.WriteLine("\nBye.");
+                return;
+            }
+
+            switch (choice)
+            {
+                case "1":
+                case "01":
+                    await NewInvestigationFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "2":
+                case "02":
+                    await OpenInvestigationFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "3":
+                case "03":
+                    ListInvestigations();
+                    break;
+                case "4":
+                case "04":
+                    await CompareInvestigationsFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "5":
+                case "05":
+                    await InvestigationReportMenuFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "6":
+                case "06":
+                    await DeleteInvestigationFlowAsync(ct).ConfigureAwait(false);
+                    break;
+                case "0":
+                case "00":
+                    return; // back to main menu
+                default:
+                    _output.WriteLine("[?] Unknown option. Choose 01-06 or 00.");
+                    break;
+            }
+        }
+    }
+
+    private async Task NewInvestigationFlowAsync(CancellationToken ct)
+    {
+        string? raw = await PromptAsync(Formatting.InputPrompt(_palette), ct).ConfigureAwait(false);
+        if (raw is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        if (raw.Length == 0)
+        {
+            _error.WriteLine("[ERROR] Empty IP address.");
+            return;
+        }
+
+        IntelligenceProfile? profile = await AnalyzeProfileAsync(raw, null, ct)
+            .ConfigureAwait(false);
+        if (profile is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Investigation investigation = BuildInvestigation(profile.Geo.Ip, "ip", profile);
+            _store.Save(investigation);
+            _output.WriteLine($"[+] Investigation saved: {investigation.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return;
+        }
+
+        _output.WriteLine(Formatting.FormatProfile(profile, _palette));
+    }
+
+    private async Task OpenInvestigationFlowAsync(CancellationToken ct)
+    {
+        string? id = await PromptAsync(
+            $"{_palette.TokenAsk()} Enter investigation ID:\n{_palette.TokenIn()} ", ct)
+            .ConfigureAwait(false);
+        if (id is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        if (id.Length == 0)
+        {
+            _error.WriteLine("[ERROR] Empty investigation ID.");
+            return;
+        }
+
+        ShowInvestigation(id);
+    }
+
+    private async Task CompareInvestigationsFlowAsync(CancellationToken ct)
+    {
+        string? first = await PromptAsync(
+            $"{_palette.TokenAsk()} First investigation ID:\n{_palette.TokenIn()} ", ct)
+            .ConfigureAwait(false);
+        if (first is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        string? second = await PromptAsync(
+            $"{_palette.TokenAsk()} Second investigation ID:\n{_palette.TokenIn()} ", ct)
+            .ConfigureAwait(false);
+        if (second is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        CompareInvestigations(first, second);
+    }
+
+    private async Task InvestigationReportMenuFlowAsync(CancellationToken ct)
+    {
+        string? id = await PromptAsync(
+            $"{_palette.TokenAsk()} Investigation ID:\n{_palette.TokenIn()} ", ct)
+            .ConfigureAwait(false);
+        if (id is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        Investigation investigation;
+        try
+        {
+            investigation = _store.Get(id);
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+            return;
+        }
+
+        string? format = await PromptAsync(
+            $"{_palette.TokenAsk()} Format (txt/json/html):\n{_palette.TokenIn()} ", ct)
+            .ConfigureAwait(false);
+        if (format is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        try
+        {
+            string path = Infrastructure.ReportService.SaveProfile(
+                investigation.Profile, format, _config.ProjectRoot);
+            _output.WriteLine($"[+] Report saved to {path}");
+        }
+        catch (Exception ex)
+        {
+            _error.WriteLine(FriendlyError(ex));
+        }
+    }
+
+    private async Task DeleteInvestigationFlowAsync(CancellationToken ct)
+    {
+        string? id = await PromptAsync(
+            $"{_palette.TokenAsk()} Investigation ID to delete:\n{_palette.TokenIn()} ", ct)
+            .ConfigureAwait(false);
+        if (id is null)
+        {
+            _output.WriteLine("\nBye.");
+            return;
+        }
+
+        DeleteInvestigation(id);
     }
 
     private async Task<string?> PromptAsync(string prompt, CancellationToken ct)

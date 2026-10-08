@@ -79,6 +79,44 @@ public static class FileCache
         }
     }
 
+    /// <summary>Age of a cached entry in seconds, or null when absent/expired.</summary>
+    public static double? GetAgeSeconds(string key, int ttlSeconds, string ns = "")
+    {
+        if (ttlSeconds <= 0)
+        {
+            return null;
+        }
+
+        string path = PathFor(key, ns);
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(path, Encoding.UTF8));
+            if (!doc.RootElement.TryGetProperty("_saved_at", out JsonElement savedEl))
+            {
+                return null;
+            }
+
+            double saved = savedEl.GetDouble();
+            double age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - saved;
+            if (age > ttlSeconds || age < 0)
+            {
+                return null;
+            }
+
+            return age;
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException
+            || ex is JsonException || ex is FormatException)
+        {
+            return null;
+        }
+    }
+
     public static void Put(string ip, JsonObject data, int ttlSeconds, string ns = "")
     {
         if (ttlSeconds <= 0)

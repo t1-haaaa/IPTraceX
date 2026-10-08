@@ -193,16 +193,142 @@ public sealed class CliTests
         Assert.Contains("abuseipdb", text);
     }
 
+    private static CliApp InvestigativeApp(
+        string dir, out StringWriter output, out StringWriter errors)
+    {
+        output = new StringWriter();
+        errors = new StringWriter();
+        var config = Sample.TestConfig();
+        config.ProjectRoot = dir;
+        return Sample.App(
+            new FakeEngine(), "", new Palette(false), config, null, output, errors);
+    }
+
+    [Fact]
+    public async Task InvestigateListOpenDeleteFlow()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var (app, output, _) = (InvestigativeApp(dir, out var o, out var e), o, e);
+            Assert.Equal(0, await app.RunAsync(["--investigate", "35.94.45.221"]));
+            Assert.Contains("Investigation saved: IPX-", output.ToString());
+
+            var (listApp, listOut, _) = (InvestigativeApp(dir, out var lo, out var le), lo, le);
+            Assert.Equal(0, await listApp.RunAsync(["--list-investigations"]));
+            Assert.Contains("35.94.45.221", listOut.ToString());
+            string id = listOut.ToString().Split()
+                .First(t => t.StartsWith("IPX-", StringComparison.Ordinal));
+
+            var (openApp, openOut, _) = (InvestigativeApp(dir, out var oo, out var oe), oo, oe);
+            Assert.Equal(0, await openApp.RunAsync(["--investigation", id]));
+            Assert.Contains("EVIDENCE MATRIX", openOut.ToString());
+
+            var (delApp, delOut, _) = (InvestigativeApp(dir, out var do_, out var de), do_, de);
+            Assert.Equal(0, await delApp.RunAsync(["--delete-investigation", id]));
+            Assert.Contains("Deleted investigation", delOut.ToString());
+
+            var (list2App, list2Out, _) = (InvestigativeApp(dir, out var lo2, out var le2), lo2, le2);
+            Assert.Equal(0, await list2App.RunAsync(["--list-investigations"]));
+            Assert.Contains("No saved investigations", list2Out.ToString());
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task CompareInvestigationsShowsChanges()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var store = new Infrastructure.FileInvestigationStore(dir);
+            var first = Sample.Profile();
+            var second = Sample.Profile();
+            second.Geo.Network.Asn = "AS99999";
+            var inv1 = new Investigation(InvestigationId.New(), DateTimeOffset.UtcNow,
+                "1.1.0", "9.9.9.9", "ip", first, [], Investigation.CurrentSchema);
+            var inv2 = new Investigation(InvestigationId.New(), DateTimeOffset.UtcNow,
+                "1.1.0", "9.9.9.9", "ip", second, [], Investigation.CurrentSchema);
+            store.Save(inv1);
+            store.Save(inv2);
+
+            var (app, output, _) = (InvestigativeApp(dir, out var o, out var e), o, e);
+            Assert.Equal(0, await app.RunAsync(["--compare", inv1.Id, inv2.Id]));
+            string text = output.ToString();
+            Assert.Contains("INVESTIGATION COMPARISON", text);
+            Assert.Contains("CHANGE DETECTED", text);
+            Assert.Contains("AS99999", text);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task CompareIpsDirectly()
+    {
+        var (app, output, _) = Make(new FakeEngine());
+        Assert.Equal(0, await app.RunAsync(["--compare-ip", "1.1.1.1", "8.8.8.8"]));
+        Assert.Contains("IP COMPARISON", output.ToString());
+    }
+
+    [Fact]
+    public async Task BatchInvestigateSavesEach()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string file = Path.Combine(dir, "ips.txt");
+            File.WriteAllText(file, "35.94.45.221\n35.94.45.221\n");
+            var config = Sample.TestConfig();
+            config.ProjectRoot = dir;
+            var (app, output, _) = Make(new FakeEngine(), config: config);
+            Assert.Equal(0, await app.RunAsync(["--file", file, "--investigate"]));
+            Assert.Contains("Investigation saved", output.ToString());
+            Assert.Single(Directory.GetFiles(
+                Path.Combine(dir, "investigations"), "*.json", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task BadInvestigationIdRejected()
+    {
+        var (app, _, errors) = Make(new FakeEngine());
+        Assert.NotEqual(0, await app.RunAsync(["--investigation", "../evil"]));
+        Assert.Contains("Invalid investigation ID", errors.ToString());
+    }
+
     [Fact]
     public async Task MainMenuOffersAllFlows()
     {
         var (app, output, _) = Make(new FakeEngine(), "00\n");
         Assert.Equal(0, await app.RunInteractiveAsync(default));
         string text = output.ToString();
-        foreach (string token in new[] { "[01]", "[02]", "[03]", "[04]", "[05]", "[06]", "[07]", "[08]", "[00]" })
+        foreach (string token in new[] { "[01]", "[02]", "[03]", "[04]", "[05]", "[06]", "[07]", "[08]", "[09]", "[00]" })
         {
             Assert.Contains(token, text);
         }
+    }
+
+    [Fact]
+    public async Task InvestigationsMenuFlow()
+    {
+        var (app, output, _) = Make(new FakeEngine(), "08\n00\n00\n");
+        Assert.Equal(0, await app.RunInteractiveAsync(default));
+        string text = output.ToString();
+        Assert.Contains("Investigations", text);
+        Assert.Contains("Compare investigations", text);
     }
 
     [Fact]

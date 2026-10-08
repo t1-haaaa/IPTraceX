@@ -21,7 +21,7 @@ source-attributed, every disagreement shown.
 
         MULTI-PROVIDER IP INTELLIGENCE & GEOLOCATION CLI
 
-[::] Version 1.1.0
+[::] Version 2.1.0
 [::] Developer: t1_haaa
 [+] Status: Ready
 
@@ -54,6 +54,8 @@ Maintained by **t1_haaa**.
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
+- [Investigations](#investigations)
+- [Evidence & Confidence](#evidence--confidence)
 - [Multi-Provider Engine](#multi-provider-engine)
 - [Consensus](#consensus)
 - [JSON Output](#json-output)
@@ -86,6 +88,7 @@ and what it all means as a transparent risk score.
 - Evidence-driven risk score (configurable weights, UNKNOWN when dry)
 - Consensus + per-field confidence + visible disagreement
 - Investigation reports: txt, json, html
+- Investigations: save, reopen, compare, timeline, evidence matrix
 - Interactive main menu + full direct CLI
 - JSON output (backward compatible, additive only)
 - Batch/stdin, provider-aware cache, Google Maps, self-IP detection
@@ -171,6 +174,10 @@ A real captured transcript lives in [`docs/demo.txt`](docs/demo.txt).
 ./iptracex.sh --rdns 8.8.8.8
 ./iptracex.sh --report html 8.8.8.8
 ./iptracex.sh --providers
+./iptracex.sh --investigate 8.8.8.8
+./iptracex.sh --list-investigations
+./iptracex.sh --compare IPX-20261001-ABC123 IPX-20261008-DEF456
+./iptracex.sh --compare-ip 1.1.1.1 8.8.8.8
 ./iptracex.sh --file ips.txt
 cat ips.txt | ./iptracex.sh --stdin
 ./iptracex.sh --no-color 8.8.8.8
@@ -179,8 +186,33 @@ cat ips.txt | ./iptracex.sh --stdin
 ```
 
 Interactive menu after startup: analyze IP/domain, self IP, reverse DNS,
-provider status, batch file, investigation report, configuration, exit —
-plus the classic post-lookup actions. See `docs/usage.md`.
+provider status, batch file, investigation report, investigations,
+configuration, exit — plus the classic post-lookup actions.
+See `docs/usage.md`.
+
+## Investigations
+
+```bash
+./iptracex.sh --investigate 8.8.8.8
+./iptracex.sh --investigation IPX-20261008-A7F31C
+./iptracex.sh --list-investigations
+./iptracex.sh --delete-investigation IPX-20261008-A7F31C
+./iptracex.sh --batch ips.txt --investigate
+```
+
+Every analysis can be frozen under an `IPX-YYYYMMDD-XXXXXX` ID with its
+profile, evidence, errors and metadata (`investigations/`), then
+reopened, compared (`--compare`, `--compare-ip`), tracked over time
+(timeline with neutral `CHANGE DETECTED` wording), and reported.
+See `docs/investigations.md`.
+
+## Evidence & Confidence
+
+Every fact shows its providers: an evidence matrix (SUPPORT / CONFLICT /
+MISSING / ERROR / CACHED) plus explained per-field confidence (level,
+reason, supporters, conflicts). Reliability tiers are displayed and only
+break exact vote ties — disagreement is never erased.
+See `docs/evidence.md` and `docs/confidence.md`.
 
 ## Multi-Provider Engine
 

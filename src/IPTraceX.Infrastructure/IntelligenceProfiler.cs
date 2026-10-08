@@ -235,10 +235,10 @@ public sealed class IntelligenceProfiler
         // --- Per-field confidence from the consensus votes. ---
         var fieldConfidences = new List<FieldConfidence>
         {
-            Field("country", geo.Geolocation.Country, geo.ProvidersAgreeing, geo.ProvidersSuccessful),
-            Field("region", geo.Geolocation.Region, geo.ProvidersAgreeing, geo.ProvidersSuccessful),
-            Field("city", geo.Geolocation.City, geo.ProvidersAgreeing, geo.ProvidersSuccessful),
-            Field("asn", geo.Network.Asn, geo.ProvidersAgreeing, geo.ProvidersSuccessful),
+            ExplainField("country", geo.Geolocation.Country, geo.Votes.Select(v => (v.Source, v.Geolocation.Country))),
+            ExplainField("region", geo.Geolocation.Region, geo.Votes.Select(v => (v.Source, v.Geolocation.Region))),
+            ExplainField("city", geo.Geolocation.City, geo.Votes.Select(v => (v.Source, v.Geolocation.City))),
+            ExplainField("asn", geo.Network.Asn, geo.Votes.Select(v => (v.Source, v.Network.Asn))),
         };
 
         var metadata = new InvestigationMetadata(
@@ -252,21 +252,64 @@ public sealed class IntelligenceProfiler
             anonymity, risk, fieldConfidences, outcomes, metadata);
     }
 
-    private static FieldConfidence Field(string name, string? value, int agreeing, int total)
+    private static FieldConfidence ExplainField(
+        string name, string? value, IEnumerable<(string Source, string? Value)> votes)
     {
+        var counted = votes.ToList();
+        var supporters = counted
+            .Where(v => v.Value is not null && SameText(v.Value, value))
+            .Select(v => v.Source)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var conflicts = counted
+            .Where(v => v.Value is not null && !SameText(v.Value, value))
+            .Select(v => $"{v.Source}->{v.Value!.Trim()}")
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        int total = counted.Count;
+        int agreeing = supporters.Count;
+
+        string level;
+        string reason;
         if (value is null)
         {
-            return new FieldConfidence(name, null, "unknown", 0, total);
+            level = "unknown";
+            reason = "No provider returned this field.";
         }
-
-        if (total <= 1)
+        else if (total <= 1)
         {
-            return new FieldConfidence(name, value, "medium", agreeing, total);
+            level = "medium";
+            reason = "Single source, uncorroborated.";
+        }
+        else if (agreeing == total)
+        {
+            level = "high";
+            reason = $"{agreeing} independent providers agree; no conflicting result.";
+        }
+        else if (agreeing * 2 >= total)
+        {
+            level = "medium";
+            reason = $"{agreeing}/{total} providers agree; {conflicts.Count} conflicting result(s).";
+        }
+        else
+        {
+            level = "low";
+            reason = $"Only {agreeing}/{total} providers agree; conflicting results dominate.";
         }
 
-        double ratio = (double)agreeing / total;
-        string confidence = ratio >= 1.0 ? "high" : ratio >= 0.5 ? "medium" : "low";
-        return new FieldConfidence(name, value, confidence, agreeing, total);
+        return new FieldConfidence(
+            name, value, level, agreeing, total, reason,
+            [.. supporters], [.. conflicts]);
+    }
+
+    private static bool SameText(string? a, string? b)
+    {
+        if (a is null || b is null)
+        {
+            return false;
+        }
+
+        return string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static string[] SourcesFor(AsnEvidence? ripe, bool geoHasAsn)

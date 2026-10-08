@@ -103,7 +103,10 @@ public sealed record FieldConfidence(
     string? Value,
     string Confidence,
     int Agreeing,
-    int Successful);
+    int Successful,
+    string Reason,
+    string[] SupportingProviders,
+    string[] ConflictingProviders);
 
 /// <summary>Run metadata (no secrets, ever).</summary>
 public sealed record InvestigationMetadata(

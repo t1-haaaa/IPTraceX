@@ -117,7 +117,7 @@ t_header_content() {
   local out
   out="$(print_header "Ready")"
   if [[ "$out" == *"MULTI-PROVIDER IP INTELLIGENCE"* \
-    && "$out" == *"Version 1.1.0"* \
+    && "$out" == *"Version 2.1.0"* \
     && "$out" == *"Developer: t1_haaa"* \
     && "$out" == *"Status: Ready"* ]]; then
     pass "header has logo, version and developer"
@@ -263,7 +263,7 @@ t_real_download_flow() {
   set +e
   out="$("$dir/iptracex.sh" --version 2>&1)"; code=$?
   set -e
-  if [[ "$code" -eq 0 && "$out" == *"IPTraceX 1.1.0"* && -x "$dir/.iptracex/bin/IPTraceX" ]]; then
+  if [[ "$code" -eq 0 && "$out" == *"IPTraceX 2.1.0"* && -x "$dir/.iptracex/bin/IPTraceX" ]]; then
     pass "download+verify+cache+exec"
   else
     fail "download flow (out='$out' code=$code)"
@@ -277,7 +277,7 @@ t_real_download_flow() {
   out="$("$dir/iptracex.sh" --version 2>&1)"; code=$?
   set -e
   after="$(stat -c %Y "$dir/.iptracex/bin/IPTraceX")"
-  if [[ "$code" -eq 0 && "$before" == "$after" && "$out" == *"IPTraceX 1.1.0"* ]]; then
+  if [[ "$code" -eq 0 && "$before" == "$after" && "$out" == *"IPTraceX 2.1.0"* ]]; then
     pass "second run uses cache (no re-download)"
   else
     fail "cache reuse (out='$out' code=$code)"

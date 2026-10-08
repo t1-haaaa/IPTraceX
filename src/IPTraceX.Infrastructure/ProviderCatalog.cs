@@ -39,4 +39,35 @@ public static class ProviderCatalog
 
     public static ProviderDescriptor? Find(string id)
         => All.FirstOrDefault(d => d.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+
+    private static readonly Dictionary<string, string> ReliabilityTiers =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["tor-exits"] = ReliabilityTier.High,
+            ["cloud-ranges"] = ReliabilityTier.High,
+            ["ipwho.is"] = ReliabilityTier.Medium,
+            ["ipapi.co"] = ReliabilityTier.Medium,
+            ["ipinfo.io"] = ReliabilityTier.Medium,
+            ["ripestat"] = ReliabilityTier.Medium,
+            ["doh-cloudflare"] = ReliabilityTier.Medium,
+            ["doh-google"] = ReliabilityTier.Medium,
+            ["system-dns"] = ReliabilityTier.Medium,
+            ["abuseipdb"] = ReliabilityTier.Medium,
+        };
+
+    /// <summary>
+    /// Documented reliability tier. Displayed next to evidence; used only
+    /// to break exact vote ties (stable sort), never to erase disagreement.
+    /// </summary>
+    public static string ReliabilityOf(string id)
+        => ReliabilityTiers.TryGetValue(id, out string? tier) ? tier : ReliabilityTier.Unknown;
+
+    public static int ReliabilityRank(string id)
+        => ReliabilityOf(id) switch
+        {
+            ReliabilityTier.High => 0,
+            ReliabilityTier.Medium => 1,
+            ReliabilityTier.Low => 2,
+            _ => 3,
+        };
 }

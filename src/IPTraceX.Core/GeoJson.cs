@@ -136,7 +136,10 @@ public static class GeoJson
         [property: JsonPropertyName("value")] string? Value,
         [property: JsonPropertyName("confidence")] string Confidence,
         [property: JsonPropertyName("agreeing")] int Agreeing,
-        [property: JsonPropertyName("successful")] int Successful);
+        [property: JsonPropertyName("successful")] int Successful,
+        [property: JsonPropertyName("reason")] string Reason,
+        [property: JsonPropertyName("supporting")] string[] Supporting,
+        [property: JsonPropertyName("conflicting")] string[] Conflicting);
 
     private sealed record MetadataDto(
         [property: JsonPropertyName("tool_version")] string ToolVersion,
@@ -158,6 +161,7 @@ public static class GeoJson
     public static JsonObject FromProfile(IntelligenceProfile profile)
     {
         JsonObject legacy = FromResult(profile.Geo);
+        legacy["schema_version"] = "2.1";
         legacy["target"] = profile.Target;
         legacy["dns"] = JsonSerializer.SerializeToNode(new DnsDto(
             profile.Dns.Ip, profile.Dns.PtrHostnames,
@@ -174,7 +178,8 @@ public static class GeoJson
             profile.Asn.Holder, profile.Asn.Sources), Relaxed);
         legacy["consensus"] = JsonSerializer.SerializeToNode(
             profile.FieldConfidences.Select(f => new FieldConfidenceDto(
-                f.Field, f.Value, f.Confidence, f.Agreeing, f.Successful)).ToList(), Relaxed);
+                f.Field, f.Value, f.Confidence, f.Agreeing, f.Successful,
+                f.Reason, f.SupportingProviders, f.ConflictingProviders)).ToList(), Relaxed);
         legacy["metadata"] = JsonSerializer.SerializeToNode(new MetadataDto(
             profile.Metadata.ToolVersion,
             profile.Metadata.TimestampUtc.ToString("o"),

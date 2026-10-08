@@ -278,9 +278,185 @@ public static class Formatting
             "[05] Provider status",
             "[06] Batch analysis from file",
             "[07] Generate investigation report",
-            "[08] Configuration",
+            "[08] Investigations",
+            "[09] Configuration",
             "[00] Exit",
             "",
             $"{p.TokenAsk()} Select an option:",
         });
+
+    public static string InvestigationsMenu(Palette p)
+        => string.Join("\n", new[]
+        {
+            "",
+            $"{p.TokenInfo()} Investigations",
+            "",
+            "[01] New investigation",
+            "[02] Open investigation",
+            "[03] List investigations",
+            "[04] Compare investigations",
+            "[05] Generate report",
+            "[06] Delete investigation",
+            "[00] Back",
+            "",
+            $"{p.TokenAsk()} Select an option:",
+        });
+
+    public static string FormatInvestigation(Investigation investigation, Palette p)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("INVESTIGATION")}",
+            $"    ID           : {p.Data(investigation.Id)}",
+            $"    Target       : {p.Data(investigation.Target)}",
+            $"    Timestamp    : {p.Data(investigation.TimestampUtc.ToString("yyyy-MM-dd HH:mm"))} UTC",
+            $"    Tool         : {p.Data($"IPTraceX {investigation.ToolVersion}")}",
+            "",
+        };
+        lines.Add(FormatProfile(investigation.Profile, p).Trim('\n'));
+        lines.Add("");
+        lines.Add(FormatEvidenceMatrix(investigation.Profile, p).Trim('\n'));
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    public static string FormatEvidenceMatrix(IntelligenceProfile profile, Palette p)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("EVIDENCE MATRIX")}",
+            "",
+            "    Field       Provider       Value                     Status",
+            "    ------------------------------------------------------------",
+        };
+        foreach (EvidenceRow row in Evidence.BuildMatrix(profile))
+        {
+            lines.Add($"    {row.Field.PadRight(11)} {row.Provider.PadRight(14)} "
+                + $"{Truncate(row.Value, 25).PadRight(25)} {row.Status}");
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenInfo()} Consensus:");
+        lines.Add($"    Country {profile.Geo.ProvidersAgreeing}/{profile.Geo.ProvidersSuccessful}");
+        lines.Add($"{p.TokenInfo()} Confidence:");
+        foreach (FieldConfidence field in profile.FieldConfidences)
+        {
+            lines.Add($"    {field.Field} {field.Confidence.ToUpperInvariant()} "
+                + $"({field.Agreeing}/{field.Successful}) - {field.Reason}");
+        }
+
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    public static string FormatTimeline(IReadOnlyList<Investigation> history, Palette p)
+    {
+        var ordered = history.OrderBy(i => i.TimestampUtc).ToList();
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("INTELLIGENCE TIMELINE")}",
+            "",
+        };
+        foreach (Investigation item in ordered)
+        {
+            var snap = Evidence.Snapshot(item.Profile);
+            lines.Add($"    {item.TimestampUtc:yyyy-MM-dd}  {item.Id}");
+            lines.Add($"      ASN: {snap["ASN"] ?? "Unknown"}  "
+                + $"Risk: {snap["Risk"] ?? "unknown"}  Tor: {snap["Tor"] ?? "UNKNOWN"}");
+        }
+
+        List<string> changes = Evidence.TimelineChanges(ordered);
+        lines.Add("");
+        lines.Add($"{p.TokenInfo()} CHANGES");
+        lines.Add("    ------------------------------------------------------------");
+        if (changes.Count == 0)
+        {
+            lines.Add("    No field changes across this history.");
+        }
+        else
+        {
+            foreach (string change in changes)
+            {
+                lines.Add($"    {change}");
+            }
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenWarn()} NOTE");
+        lines.Add("    A change in GeoIP result does NOT prove physical movement.");
+        lines.Add("    It may reflect database updates, provider changes,");
+        lines.Add("    reassignment, BGP changes, or ISP data corrections.");
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    public static string FormatComparison(
+        Investigation first, Investigation second, Palette p)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("INVESTIGATION COMPARISON")}",
+            "",
+            $"    A: {first.Id} ({first.TimestampUtc:yyyy-MM-dd})",
+            $"    B: {second.Id} ({second.TimestampUtc:yyyy-MM-dd})",
+            "",
+            "    Field           A                   B",
+            "    ------------------------------------------------------------",
+        };
+        int changed = 0;
+        foreach (var (field, a, b, isChanged) in Evidence.Compare(first, second))
+        {
+            if (isChanged)
+            {
+                changed++;
+            }
+
+            lines.Add($"    {field.PadRight(15)} {(a ?? "-").PadRight(19)} {(b ?? "-").PadRight(19)}"
+                + (isChanged ? "  CHANGE DETECTED" : ""));
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenInfo()} Changed fields: {changed}");
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    public static string FormatProfileComparison(
+        IntelligenceProfile first, IntelligenceProfile second, Palette p)
+    {
+        var lines = new List<string>
+        {
+            "",
+            $"{p.TokenOk()} {p.Brand("IP COMPARISON")}",
+            "",
+            $"    A: {first.Target}",
+            $"    B: {second.Target}",
+            "",
+            "    Field           A                   B",
+            "    ------------------------------------------------------------",
+        };
+        int changed = 0;
+        foreach (var (field, a, b, isChanged) in Evidence.CompareProfiles(first, second))
+        {
+            if (isChanged)
+            {
+                changed++;
+            }
+
+            lines.Add($"    {field.PadRight(15)} {(a ?? "-").PadRight(19)} {(b ?? "-").PadRight(19)}"
+                + (isChanged ? "  CHANGE DETECTED" : ""));
+        }
+
+        lines.Add("");
+        lines.Add($"{p.TokenInfo()} Changed fields: {changed}");
+        lines.Add("");
+        return string.Join("\n", lines);
+    }
+
+    private static string Truncate(string value, int width)
+        => value.Length <= width ? value : value[..(width - 3)] + "...";
 }

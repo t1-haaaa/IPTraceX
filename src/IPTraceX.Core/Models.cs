@@ -31,6 +31,8 @@ public sealed class ProviderDetail
     public string Status { get; set; } = "skipped"; // success | failed | skipped
     public string? Error { get; set; }
     public string Summary { get; set; } = ""; // e.g. "Algeria / Tindouf"
+    public string Freshness { get; set; } = "LIVE"; // LIVE | CACHED
+    public double? AgeSeconds { get; set; }
 }
 
 /// <summary>
@@ -54,4 +56,10 @@ public sealed class GeoResult
     public double AgreementRatio { get; set; }
     public bool Disputed { get; set; }
     public List<ProviderDetail> Providers { get; } = [];
+
+    /// <summary>
+    /// Successful normalized provider votes in provider order, retained
+    /// for evidence display. Never serialized in the legacy contract.
+    /// </summary>
+    public List<GeoResult> Votes { get; } = [];
 }
