@@ -4,5 +4,5 @@ namespace IPTraceX.Core;
 public static class AppInfo
 {
     public const string Name = "IPTraceX";
-    public const string Version = "2.3.0";
+    public const string Version = "2.4.0";
 }

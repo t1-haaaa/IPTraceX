@@ -116,10 +116,13 @@ public static class EmailIntel
         bool hints = !password
             && (security?.PasswordHints == ExposureStatus.Reported
                 || security?.RecoveryExposure == ExposureStatus.Reported);
+        string breachSource = security?.Sources.Length > 0
+            ? string.Join(",", security.Sources)
+            : "hibp";
         if (token)
         {
             evidence.Add(new RiskEvidence(
-                "Authentication data exposure", "CRITICAL", "hibp",
+                "Authentication data exposure", "CRITICAL", breachSource,
                 "A breach reports auth tokens or session material for this address.",
                 Weight("authtoken", 35),
                 "Token theft enables session hijack without the password."));
@@ -128,7 +131,7 @@ public static class EmailIntel
         if (password)
         {
             evidence.Add(new RiskEvidence(
-                "Password exposure", "HIGH", "hibp",
+                "Password exposure", "HIGH", breachSource,
                 "A breach reports password data for this address (existence only; value never retrieved).",
                 Weight("password", 30),
                 "Exposed passwords enable credential-stuffing and takeover where reused."));
@@ -137,7 +140,7 @@ public static class EmailIntel
         {
             int extra = Math.Min(5, (breachCount - 1) * 5);
             evidence.Add(new RiskEvidence(
-                "Breach exposure", "MEDIUM", "hibp",
+                "Breach exposure", "MEDIUM", breachSource,
                 $"{breachCount} breache(s) expose this address (metadata only).",
                 Weight("breach", 10) + extra,
                 "Presence in breach corpora raises takeover/phishing exposure."));
@@ -146,7 +149,7 @@ public static class EmailIntel
         if (hints && !password)
         {
             evidence.Add(new RiskEvidence(
-                "Password hint exposure", "MEDIUM", "hibp",
+                "Password hint exposure", "MEDIUM", breachSource,
                 "A breach reports password hints or recovery data for this address.",
                 Weight("hints", 20),
                 "Hints and recovery answers help attackers guess credentials."));

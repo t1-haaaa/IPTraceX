@@ -136,6 +136,71 @@ public sealed class EmailProviderTests
     }
 
     [Fact]
+    public async Task XposedOrNotParsesBreachNames()
+    {
+        var fetcher = new FakeFetcher(_ => FakeFetcher.Json(
+            """{"breaches":[["Adobe","LinkedIn"]],"email":"user@gmail.com","status":"success"}"""));
+        var provider = new XposedOrNotProvider(5, fetcher);
+        EmailEvidence evidence = await provider.InvestigateAsync(Target(), Ctx());
+        var breach = Assert.IsType<BreachEvidence>(evidence);
+        Assert.True(breach.Success);
+        Assert.Equal(2, breach.Breaches.Length);
+        Assert.Equal("Adobe", breach.Breaches[0].Name);
+        Assert.Equal("XON", breach.Breaches[0].Source);
+        Assert.Empty(breach.Breaches[0].Categories);
+    }
+
+    [Fact]
+    public async Task XposedOrNotNotFoundIsCleanSuccess()
+    {
+        var fetcher = new FakeFetcher(_ => FakeFetcher.Json(
+            """{"Error":"Not found","email":null}"""));
+        var provider = new XposedOrNotProvider(5, fetcher);
+        EmailEvidence evidence = await provider.InvestigateAsync(Target(), Ctx());
+        var breach = Assert.IsType<BreachEvidence>(evidence);
+        Assert.True(breach.Success);
+        Assert.Empty(breach.Breaches);
+    }
+
+    [Fact]
+    public async Task XposedOrNotMalformedIsFailureNotCrash()
+    {
+        var fetcher = new FakeFetcher(_ => FakeFetcher.Json("""{"breaches":"oops"}"""));
+        var provider = new XposedOrNotProvider(5, fetcher);
+        EmailEvidence evidence = await provider.InvestigateAsync(Target(), Ctx());
+        var breach = Assert.IsType<BreachEvidence>(evidence);
+        Assert.True(breach.Success);
+        Assert.Empty(breach.Breaches);
+    }
+
+    [Fact]
+    public void MergeBreachesDedupesByNameRicherWins()
+    {
+        var merged = BreachSecurity.MergeBreaches([
+            new BreachInfo("Adobe", null, null, [], "XON"),
+            new BreachInfo("adobe", "adobe.com", "2013-10-01", ["Email addresses", "Passwords"], "HIBP"),
+            new BreachInfo("LinkedIn", null, null, [], "XON"),
+        ]);
+        Assert.Equal(2, merged.Count);
+        var adobe = Assert.Single(merged, b => b.Name.Equals("Adobe", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("HIBP", adobe.Source);
+        Assert.Contains("Passwords", adobe.Categories);
+    }
+
+    [Fact]
+    public void AnalyzeNamedCountsAcrossProviders()
+    {
+        EmailSecurityExposure exposure = BreachSecurity.AnalyzeNamed(
+            [("Adobe", (IReadOnlyList<string>)["Email addresses"]),
+             ("LinkedIn", (IReadOnlyList<string>)["Email addresses"])],
+            true, ["hibp", "xon"]);
+        Assert.Equal(ExposureStatus.Reported, exposure.BreachExposure);
+        Assert.Equal(2, exposure.BreachCount);
+        Assert.Equal(ExposureStatus.NotReported, exposure.PasswordExposure);
+        Assert.Equal(["hibp", "xon"], exposure.Sources);
+    }
+
+    [Fact]
     public async Task ProviderFailureIsolated()
     {
         var failing = new FakeEmailProvider("boom", new ProviderException("down"));

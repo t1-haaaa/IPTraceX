@@ -950,7 +950,7 @@ public sealed class CliApp
         }
 
         EmailSecurityExposure security = profile.Security
-            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.BreachAvailable(profile));
         Audit(AuditEventTypes.EmailBreachCheck, operation: "breach-check",
             correlationId: correlation, targetType: "email", targetReference: profile.Normalized,
             status: security.BreachExposure,

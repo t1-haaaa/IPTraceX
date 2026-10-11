@@ -92,6 +92,66 @@ public static class BreachSecurity
             breaches.Select(b => (IReadOnlyList<string>)b.Categories).ToList(),
             sourceAvailable);
 
+    /// <summary>
+    /// Merge breach lists from several providers. One breach = one entry:
+    /// dedupe by normalized name, keeping the entry with the richest
+    /// metadata (data classes win over bare names).
+    /// </summary>
+    public static IReadOnlyList<BreachInfo> MergeBreaches(IEnumerable<BreachInfo> breaches)
+    {
+        var merged = new Dictionary<string, BreachInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (BreachInfo breach in breaches)
+        {
+            string key = (breach.Name ?? "").Trim();
+            if (key.Length == 0)
+            {
+                continue;
+            }
+
+            if (!merged.TryGetValue(key, out BreachInfo? existing)
+                || (existing.Categories.Length == 0 && breach.Categories.Length != 0))
+            {
+                merged[key] = breach;
+            }
+        }
+
+        return [.. merged.Values];
+    }
+
+    /// <summary>
+    /// Named analysis: dedupe by breach name across providers, then run
+    /// the same category logic. Sources reflect the providers that answered.
+    /// </summary>
+    public static EmailSecurityExposure AnalyzeNamed(
+        IReadOnlyList<(string Name, IReadOnlyList<string> Categories)> breaches,
+        bool sourceAvailable,
+        string[]? sources = null)
+    {
+        sources ??= ["hibp"];
+        if (!sourceAvailable)
+        {
+            return Empty(ExposureStatus.Unknown, []);
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unique = new List<IReadOnlyList<string>>();
+        foreach (var (name, categories) in breaches)
+        {
+            string key = (name ?? "").Trim();
+            if (key.Length == 0)
+            {
+                continue;
+            }
+
+            if (seen.Add(key))
+            {
+                unique.Add(categories);
+            }
+        }
+
+        return AnalyzeUnique(unique, sources);
+    }
+
     /// <summary>Stored-payload path: same logic over serialized category lists.</summary>
     public static EmailSecurityExposure AnalyzeCategories(
         IReadOnlyList<IReadOnlyList<string>> categoriesPerBreach, bool sourceAvailable)
@@ -115,9 +175,15 @@ public static class BreachSecurity
             }
         }
 
+        return AnalyzeUnique(unique, ["hibp"]);
+    }
+
+    private static EmailSecurityExposure AnalyzeUnique(
+        List<IReadOnlyList<string>> unique, string[] sources)
+    {
         if (unique.Count == 0)
         {
-            return Empty(ExposureStatus.NotReported, ["hibp"]);
+            return Empty(ExposureStatus.NotReported, sources);
         }
 
         var normalized = unique.Select(NormalizedCategories).ToList();
@@ -149,7 +215,7 @@ public static class BreachSecurity
             RecommendationsFor(
                 password > 0, hints > 0, tokens > 0, recovery > 0,
                 unique.Count > 0),
-            ["hibp"]);
+            sources);
         return exposure;
     }
 

@@ -26,7 +26,7 @@ source-attributed, every disagreement shown.
 
         MULTI-PROVIDER IP INTELLIGENCE & GEOLOCATION CLI
 
-[::] Version 2.3.0
+[::] Version 2.4.0
 [::] Developer: t1_haaa
 [+] Status: Ready
 
@@ -351,8 +351,9 @@ discovered IP plus an infrastructure summary.
 ```
 
 Public-OSINT only: domain/MX/SPF/DMARC/DNSSEC, disposable and
-free-mail classification, public avatar, public footprint, optional
-HIBP breach metadata (`IPTRACEX_HIBP_API_KEY`) with password/hint/token
+free-mail classification, public avatar, public footprint, free breach
+detection (XposedOrNot, no key needed) plus optional HIBP breach
+metadata (`IPTRACEX_HIBP_API_KEY`) with password/hint/token
 exposure alerts, severity, and evidence-driven recommendations, email
 risk and explained confidence — saved under `EMX-YYYYMMDD-XXXXXX` IDs
 with comparison and timeline support. Reports the EXISTENCE and TYPE

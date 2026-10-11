@@ -24,6 +24,7 @@ public sealed class EmailProfiler
         new GravatarProvider(_config.TimeoutSeconds, _fetcher),
         new GitHubFootprintProvider(_config.TimeoutSeconds, _fetcher),
         new HibpBreachProvider(_config.TimeoutSeconds, _fetcher, _config.HibpApiKey),
+        new XposedOrNotProvider(_config.TimeoutSeconds, _fetcher),
     ];
 
     public async Task<EmailProfile> AnalyzeEmailAsync(
@@ -52,8 +53,15 @@ public sealed class EmailProfiler
             .FirstOrDefault(e => e.Success);
         FootprintEvidence? footprint = evidence.OfType<FootprintEvidence>()
             .FirstOrDefault(e => e.Success);
-        BreachEvidence? breach = evidence.OfType<BreachEvidence>()
-            .FirstOrDefault(e => e.Success);
+        BreachEvidence[] breachSources = evidence.OfType<BreachEvidence>()
+            .Where(e => e.Success)
+            .ToArray();
+        bool breachAvailable = breachSources.Length != 0;
+        string[] breachProviderIds = [.. breachSources
+            .Select(e => e.ProviderId)
+            .Distinct(StringComparer.Ordinal)];
+        var breaches = BreachSecurity.MergeBreaches(
+            breachSources.SelectMany(e => e.Breaches));
 
         var domainIntel = new EmailDomainIntel(
             target.Domain,
@@ -78,17 +86,18 @@ public sealed class EmailProfiler
             avatar is null ? "UNKNOWN" : avatar.Found ? "MEDIUM" : "UNKNOWN");
 
         var footprintMatches = footprint?.Matches ?? [];
-        var breaches = breach?.Breaches ?? [];
 
         bool isNew = domain?.DomainCreatedUtc is DateTimeOffset created
             && (DateTimeOffset.UtcNow - created).TotalDays < 30;
         bool hasMx = (domain?.MxHosts.Length ?? 0) != 0;
         EmailReputation reputation = EmailIntel.BuildReputation(
             domain?.Disposable, breaches, isNew, hasMx);
-        EmailSecurityExposure security = BreachSecurity.Analyze(breaches, breach is not null);
+        EmailSecurityExposure security = BreachSecurity.AnalyzeNamed(
+            [.. breaches.Select(b => (b.Name, (IReadOnlyList<string>)b.Categories))],
+            breachAvailable, breachProviderIds);
 
         RiskAssessment risk = EmailIntel.EvaluateRisk(
-            domain?.Disposable, breaches.Length,
+            domain?.Disposable, security.BreachCount,
             reputation.SuspiciousDomain == "DETECTED",
             security,
             EmailIntel.ParseEmailWeights(_config.EmailRiskWeights));
@@ -114,17 +123,17 @@ public sealed class EmailProfiler
                     ? "One public provider returned an avatar."
                     : "No public avatar found; absence proves nothing."),
             Field("breach",
-                breaches.Length == 0 ? null : $"{breaches.Length} breach(es)",
-                breach is null ? 0 : 1, 1,
-                breach is null
+                breaches.Count == 0 ? null : $"{breaches.Count} breach(es)",
+                breachAvailable ? 1 : 0, 1,
+                !breachAvailable
                     ? "No breach-intelligence source configured."
-                    : breaches.Length == 0
-                        ? "Breach corpus queried; address absent."
-                        : "Breach metadata returned by the corpus."),
+                    : breaches.Count == 0
+                        ? "Breach sources queried; address absent."
+                        : "Breach metadata returned by " + string.Join(", ", breachProviderIds) + "."),
             Field("password-exposure",
                 security.PasswordExposure == ExposureStatus.Unknown ? null : security.PasswordExposure,
-                breach is null ? 0 : 1, 1,
-                breach is null
+                breachAvailable ? 1 : 0, 1,
+                !breachAvailable
                     ? "No breach-intelligence source configured."
                     : security.PasswordExposure == ExposureStatus.Reported
                         ? "A known breach reports password data (existence only; value never retrieved)."

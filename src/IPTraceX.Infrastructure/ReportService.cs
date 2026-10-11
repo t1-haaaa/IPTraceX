@@ -92,7 +92,7 @@ public static class ReportService
         }
 
         EmailSecurityExposure security = profile.Security
-            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.BreachAvailable(profile));
         sb.AppendLine();
         sb.AppendLine("SECURITY EXPOSURE");
         sb.Append("Known Breaches: ").AppendLine(security.BreachCount.ToString());
@@ -133,7 +133,7 @@ public static class ReportService
     {
         static string E(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "Unknown");
         EmailSecurityExposure security = profile.Security
-            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.BreachAvailable(profile));
         var sb = new System.Text.StringBuilder();
         sb.Append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
             + "<title>IPTraceX Email Investigation Report</title>\n<style>\n"

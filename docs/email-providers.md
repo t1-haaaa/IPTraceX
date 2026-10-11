@@ -1,6 +1,6 @@
 # Email Providers
 
-Four adapters behind `IEmailProvider`, run by `EmailOrchestrator` over
+Five adapters behind `IEmailProvider`, run by `EmailOrchestrator` over
 the shared bounded runner (max concurrency, global timeout,
 per-provider timeout, failure isolation, health tracking).
 
@@ -10,6 +10,7 @@ per-provider timeout, failure isolation, health tracking).
 | gravatar | Gravatar | Avatar | none | `en.gravatar.com/{md5}.json` (404 = UNKNOWN) |
 | github-footprint | GitHub Footprint | Footprint | optional `IPTRACEX_GITHUB_TOKEN` | `api.github.com/users/{handle}`, commit search (authed) |
 | hibp | Have I Been Pwned | Breach | `IPTRACEX_HIBP_API_KEY` | `haveibeenpwned.com/api/v3/breachedaccount/{email}` |
+| xon | XposedOrNot | Breach | none (free) | `api.xposedornot.com/v1/check-email/{email}` |
 
 ## Notes
 
@@ -25,5 +26,9 @@ per-provider timeout, failure isolation, health tracking).
   (LOW, weak) and token-gated commit-authorship search (MEDIUM).
 - `hibp` is skipped cleanly without a key (`failed: not configured`);
   404 means absent from the corpus; only safe metadata is kept.
+- `xon` needs no key and reports breach NAMES only (no data classes,
+  dates, or dumps). Same-name hits from both breach sources merge into
+  one entry (the richer HIBP record wins); password exposure stays
+  `NOT_REPORTED` on XON-only data, never inferred.
 - API keys come from the environment only and never appear in JSON,
   reports, investigations, cache, or logs.

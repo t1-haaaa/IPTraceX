@@ -31,7 +31,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
 APP="IPTraceX"
-APP_VERSION="2.3.0" # keep in sync with src/IPTraceX.Core/AppInfo.cs
+APP_VERSION="2.4.0" # keep in sync with src/IPTraceX.Core/AppInfo.cs
 ARCHIVE="iptracex-linux-x64.tar.gz"
 BINARY="$SCRIPT_DIR/$APP"
 

@@ -370,7 +370,7 @@ public static class Formatting
     public static string FormatEmailProfile(EmailProfile profile, Palette p)
     {
         EmailSecurityExposure security = profile.Security
-            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.BreachAvailable(profile));
         var lines = new List<string>
         {
             "",
@@ -564,7 +564,7 @@ public static class Formatting
     public static string FormatEmailBreaches(EmailProfile profile, Palette p)
     {
         EmailSecurityExposure security = profile.Security
-            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.BreachAvailable(profile));
         var lines = new List<string>
         {
             "",
@@ -612,7 +612,7 @@ public static class Formatting
     public static string FormatEmailRecommendations(EmailProfile profile, Palette p)
     {
         EmailSecurityExposure security = profile.Security
-            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.BreachAvailable(profile));
         var lines = new List<string>
         {
             "",
@@ -787,7 +787,7 @@ public static class Formatting
     public static string FormatEmailEvidence(EmailProfile profile, Palette p)
     {
         EmailSecurityExposure security = profile.Security
-            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.BreachAvailable(profile));
         string EvidenceFor(string status) => status switch
         {
             ExposureStatus.Reported => "DataClasses contains the sensitive class",

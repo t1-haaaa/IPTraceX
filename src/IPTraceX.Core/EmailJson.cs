@@ -115,7 +115,7 @@ public static class EmailJson
 
         doc["breach_intelligence"] = breaches;
         EmailSecurityExposure security = profile.Security
-            ?? BreachSecurity.Analyze(profile.Breaches, HibpAvailable(profile));
+            ?? BreachSecurity.Analyze(profile.Breaches, BreachAvailable(profile));
         doc["security_exposure"] = JsonSerializer.SerializeToNode(new SecurityExposureDto(
             security.BreachExposure, security.PasswordExposure, security.PasswordHints,
             security.AuthData, security.BreachCount, security.Severity,
@@ -192,4 +192,9 @@ public static class EmailJson
     public static bool HibpAvailable(EmailProfile profile)
         => profile.Providers.Any(o =>
             o.ProviderId == "hibp" && o.Status == "success");
+
+    /// <summary>Any successful breach source (HIBP and/or free XposedOrNot).</summary>
+    public static bool BreachAvailable(EmailProfile profile)
+        => profile.Providers.Any(o =>
+            (o.ProviderId == "hibp" || o.ProviderId == "xon") && o.Status == "success");
 }

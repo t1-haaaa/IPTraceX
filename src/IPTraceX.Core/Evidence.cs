@@ -160,7 +160,7 @@ public static class Evidence
     public static IReadOnlyDictionary<string, string?> EmailSnapshot(EmailProfile profile)
     {
         EmailSecurityExposure security = profile.Security
-            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.HibpAvailable(profile));
+            ?? BreachSecurity.Analyze(profile.Breaches, EmailJson.BreachAvailable(profile));
         return new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["Domain"] = profile.Domain,

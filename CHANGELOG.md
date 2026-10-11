@@ -3,6 +3,17 @@
 All notable changes to IPTraceX are documented here.
 Format follows Keep a Changelog; versions follow SemVer.
 
+## 2.4.0 — 2026-10-11
+
+- feat: free breach intelligence via XposedOrNot (`xon` provider, no
+  key required) — breach-name detection now works out of the box;
+  HIBP remains the key-gated source for password/data-class depth.
+- feat: multi-source breach merge — same-name hits from HIBP + XON
+  collapse into one entry (richer record wins); exposure counting,
+  risk weights, and recommendations deduplicate across providers.
+- fix: risk evidence `source` now names the actual breach providers
+  instead of hardcoded `hibp`.
+
 ## 2.3.0 — 2026-10-08
 
 - feat: central audit logging — structured `AuditEvent` taxonomy
