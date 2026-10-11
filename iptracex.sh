@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# IPTraceX production launcher (Kali/Linux).
+# IPTraceX zero-setup launcher (Kali/Linux x86-64).
 #
 #   git clone https://github.com/t1-haaaa/IPTraceX.git
 #   cd IPTraceX
 #   chmod +x iptracex.sh
 #   ./iptracex.sh
 #
-# Resolution order (no .NET SDK, no compilation, no first-run publish):
-#   1. $SCRIPT_DIR/IPTraceX               (binary next to the launcher)
-#   2. $SCRIPT_DIR/.iptracex/bin/IPTraceX (local cache)
-#   3. Official GitHub Release download (HTTPS + SHA256 verified)
+# The repository ships the prebuilt Linux x64 runtime next to this
+# launcher (./IPTraceX). Normal startup NEVER downloads, compiles,
+# installs, contacts GitHub, or requires the .NET SDK.
+#
+# Resolution: ./IPTraceX only. If it is missing, fail immediately —
+# never download or build anything implicitly.
 #
 # The full branding header lives in the binary itself; the launcher prints
-# it only while bootstrapping (binary missing), so it is never duplicated.
-# All arguments are forwarded: exec "$BINARY" "$@".
+# it only for errors. All arguments are forwarded: exec "$BINARY" "$@".
+#
+# Explicit self update only (--update): refresh ./IPTraceX from the
+# official GitHub Release (HTTPS + SHA256 verified).
 #
 # Diagnostic overrides (tests/scripting only, never required):
 #   IPTraceX_ALWAYS_CLEAR=1  force terminal clear even when not a tty
@@ -29,8 +33,10 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 APP="IPTraceX"
 APP_VERSION="2.3.0" # keep in sync with src/IPTraceX.Core/AppInfo.cs
 ARCHIVE="iptracex-linux-x64.tar.gz"
+BINARY="$SCRIPT_DIR/$APP"
 
 # Official sources only. Never accept a download URL from the user.
+# Used ONLY by the explicit --update command, never at startup.
 RELEASE_BASE="https://github.com/t1-haaaa/IPTraceX/releases/latest/download"
 TARBALL_URL="$RELEASE_BASE/$ARCHIVE"
 SHA_URL="$RELEASE_BASE/SHA256SUMS"
@@ -121,6 +127,15 @@ check_arch() {
   echo "$arch"
 }
 
+is_elf_x86_64() {
+  # is_elf_x86_64 <file> — magic + class + machine check, no dependencies.
+  local file="$1" magic
+  [[ -f "$file" ]] || return 1
+  magic="$(od -An -tx1 -N20 "$file" 2>/dev/null | tr -d ' \n')" || return 1
+  # 7f 45 4c 46 (ELF), 02 (64-bit), 01 (LE), 01 (version), 3e 00 (x86-64).
+  [[ "${magic:0:8}" == "7f454c46" && "${magic:8:2}" == "02" && "${magic:36:4}" == "3e00" ]]
+}
+
 detect_downloader() {
   if command -v curl >/dev/null 2>&1; then
     echo "curl"
@@ -131,12 +146,9 @@ detect_downloader() {
   fi
 }
 
-# Hard bounds for every download (never hang indefinitely).
-# Overridable per-call for tests/scripting:
-# IPTRACEX_CONNECT_TIMEOUT (default 15), IPTRACEX_DOWNLOAD_TIMEOUT (default 180).
-
 download_file() {
   # download_file <url> <dest> <tool> — quiet progress, visible errors.
+  # Used ONLY by the explicit --update command, never at startup.
   # Fails fast on HTTP 404/403; maps curl/wget failures to clear messages.
   local url="$1" dest="$2" downloader="$3"
   case "$url" in
@@ -164,7 +176,7 @@ download_file() {
     fi
     if [[ "$curl_status" -eq 28 ]]; then
       log_err "[ERROR] Download timed out after ${max_time}s: $(basename "$dest")."
-      log_err "[!] Check connectivity and retry, or use a cached/local binary."
+      log_err "[!] Check connectivity and retry."
       return 1
     fi
     case "$http_code" in
@@ -174,7 +186,7 @@ download_file() {
         ;;
       403)
         log_err "[ERROR] Download forbidden (HTTP 403): $(basename "$dest")."
-        log_err "[!] Possible API rate limiting — wait and retry, or use a cached/local binary."
+        log_err "[!] Possible API rate limiting — wait and retry."
         ;;
       000)
         log_err "[ERROR] Network failure downloading $(basename "$dest")."
@@ -196,7 +208,7 @@ download_file() {
         log_err "[!] The GitHub Release may not be published yet — check for v$APP_VERSION."
       elif [[ "$st" -eq 4 ]]; then
         log_err "[ERROR] Network failure downloading $(basename "$dest")."
-        log_err "[!] Check connectivity and retry, or use a cached/local binary."
+        log_err "[!] Check connectivity and retry."
       else
         log_err "[ERROR] Download failed (wget exit $st): $(basename "$dest")."
       fi
@@ -231,8 +243,8 @@ verify_archive() {
 }
 
 install_binary() {
-  # Download + verify + atomic install into the cache.
-  # Never deletes a previously working binary on failure.
+  # Explicit --update only: download + verify + atomic install next to
+  # the launcher. Never deletes a working binary on failure.
   local downloader tmpdir archive sums arch
   downloader="$(detect_downloader)"
   if [[ -z "$downloader" ]]; then
@@ -241,13 +253,9 @@ install_binary() {
     return 1
   fi
   arch="$(check_arch)" || return 1
-  mkdir -p "$CACHE_ROOT" || {
-    log_err "[ERROR] Cannot create cache directory: $CACHE_ROOT"
-    return 1
-  }
-  tmpdir="$(mktemp -d "$CACHE_ROOT/tmp.XXXXXX")"
+  tmpdir="$(mktemp -d "$SCRIPT_DIR/tmp.XXXXXX")"
   if [[ -z "${tmpdir:-}" || ! -d "$tmpdir" ]]; then
-    log_err "[ERROR] Cannot create temporary directory under $CACHE_ROOT."
+    log_err "[ERROR] Cannot create temporary directory under $SCRIPT_DIR."
     return 1
   fi
   archive="$tmpdir/$ARCHIVE"
@@ -279,22 +287,23 @@ install_binary() {
     rm -rf "$tmpdir"
     return 1
   fi
+  if ! is_elf_x86_64 "$tmpdir/extract/$APP"; then
+    log_err "[ERROR] Downloaded $APP is not a Linux x86-64 executable."
+    rm -rf "$tmpdir"
+    return 1
+  fi
   chmod +x "$tmpdir/extract/$APP"
-  mkdir -p "$CACHE_ROOT/bin"
-  mv -f "$tmpdir/extract/$APP" "$CACHE_BIN"
-  chmod +x "$CACHE_BIN"
+  mv -f "$tmpdir/extract/$APP" "$BINARY"
+  chmod +x "$BINARY"
   rm -rf "$tmpdir"
   echo "$(c_green '[+]') IPTraceX is ready."
   return 0
 }
 
 resolve_binary() {
-  if [[ -x "$SCRIPT_DIR/$APP" ]]; then
-    echo "$SCRIPT_DIR/$APP"
-    return 0
-  fi
-  if [[ -x "$CACHE_BIN" ]]; then
-    echo "$CACHE_BIN"
+  # Zero-setup: the shipped ./IPTraceX only. No cache, no download.
+  if [[ -f "$BINARY" ]]; then
+    echo "$BINARY"
     return 0
   fi
   return 1
@@ -309,6 +318,13 @@ run_update() {
   return 0
 }
 
+fail_missing_binary() {
+  log_err "[!] IPTraceX binary is missing."
+  log_err "[!] Re-clone/re-download the official repository."
+  log_err "[!] Expected: $BINARY"
+  exit 1
+}
+
 main() {
   if is_windows; then
     log_err "[ERROR] IPTraceX Linux binary cannot run on Windows/Git Bash."
@@ -320,7 +336,7 @@ main() {
   if is_debug "$@"; then debug=1; fi
   color_setup "$@"
 
-  # --- Self update: refresh from the official latest release. ---
+  # --- Explicit self update only. Normal startup never downloads. ---
   if [[ "${1:-}" == "--update" ]]; then
     shift || true
     maybe_clear
@@ -328,67 +344,41 @@ main() {
       exit 1
     fi
     if [[ "$#" -eq 0 ]]; then
-      "$CACHE_BIN" --version
+      "$BINARY" --version
       exit 0
     fi
     # fall through and execute the fresh binary with the remaining args
   fi
 
-  # Interactive (no arguments): clean branded start.
-  if [[ "$#" -eq 0 ]]; then
-    maybe_clear
-    local binary
-    binary="$(resolve_binary || true)"
-    if [[ -z "$binary" ]]; then
-      print_header "Preparing..."
-      if ! install_binary; then
-        log_err "[ERROR] IPTraceX binary is unavailable."
-        log_err "[!] Platform: Linux $(uname -m 2>/dev/null || echo unknown)"
-        log_err "[!] Attempted official release download."
-        exit 1
-      fi
-      binary="$CACHE_BIN"
-    else
-      print_header "Ready"
-    fi
-    if [[ "$debug" -eq 1 ]]; then
-      debug_line "Platform: Linux"
-      debug_line "Architecture: $(uname -m 2>/dev/null || echo unknown)"
-      debug_line "Binary: $binary"
-      debug_line "Cache: $CACHE_BIN"
-    fi
-    if [[ ! -x "$binary" ]]; then
-      chmod +x "$binary"
-    fi
-    export IPTRACEX_PROJECT_ROOT="$SCRIPT_DIR"
-    export IPTraceX_LAUNCHER_UI=1
-    exec "$binary"
-  fi
+  check_arch >/dev/null || exit 1
 
-  # Non-interactive: silent resolve, full forwarding (JSON-safe, no extras).
-  if [[ "$debug" -eq 1 ]]; then
-    debug_line "Platform: Linux"
-    debug_line "Architecture: $(uname -m 2>/dev/null || echo unknown)"
-    debug_line "Release URL: $TARBALL_URL"
-  fi
+  # Zero-setup resolution: shipped binary or immediate failure.
   local binary
   binary="$(resolve_binary || true)"
   if [[ -z "$binary" ]]; then
-    log_err "[ERROR] IPTraceX binary is unavailable."
-    log_err "[!] Platform: Linux $(uname -m 2>/dev/null || echo unknown)"
-    log_err "[!] Attempting official release download."
-    if ! install_binary; then
-      exit 1
-    fi
-    binary="$CACHE_BIN"
-    if [[ "$debug" -eq 1 ]]; then
-      debug_line "SHA256: verified"
-    fi
+    fail_missing_binary
+  fi
+  if ! is_elf_x86_64 "$binary"; then
+    log_err "[ERROR] $binary is not a Linux x86-64 executable."
+    fail_missing_binary
+  fi
+
+  if [[ "$#" -eq 0 ]]; then
+    maybe_clear
+    print_header "Ready"
+  elif [[ "$debug" -eq 1 ]]; then
+    debug_line "Platform: Linux"
+    debug_line "Architecture: $(uname -m 2>/dev/null || echo unknown)"
+    debug_line "Binary: $binary"
   fi
   if [[ ! -x "$binary" ]]; then
     chmod +x "$binary"
   fi
   export IPTRACEX_PROJECT_ROOT="$SCRIPT_DIR"
+  export IPTraceX_LAUNCHER_UI=1
+  if [[ "$#" -eq 0 ]]; then
+    exec "$binary"
+  fi
   exec "$binary" "$@"
 }
 

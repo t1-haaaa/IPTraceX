@@ -106,8 +106,10 @@ and what it all means as a transparent risk score.
 
 ## Installation
 
-Kali/Linux (from source checkout — the release layout already ships the
-`IPTraceX` binary next to the launcher):
+Zero-setup on Kali/Linux x86-64 — the repository itself ships the
+prebuilt runtime (`IPTraceX`, self-contained .NET single-file ELF)
+next to the launcher. No .NET SDK, no compilation, no download,
+no install step, no GitHub contact at startup:
 
 ```bash
 git clone https://github.com/t1-haaaa/IPTraceX.git
@@ -118,7 +120,14 @@ chmod +x iptracex.sh
 
 No .NET install needed to run. No root, no sudo.
 
-From the GitHub release instead:
+`./IPTraceX` is the prebuilt Linux x64 runtime, rebuilt from source
+for every release (reproducible via `dotnet publish`
+`-r linux-x64 --self-contained true -p:PublishSingleFile=true`).
+The optional `./iptracex.sh --update` command refreshes it from the
+official GitHub Release (SHA256-verified); normal startup never
+downloads anything.
+
+From the GitHub release instead (additional channel, same files):
 
 ```bash
 mkdir IPTraceX && cd IPTraceX

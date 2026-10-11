@@ -2,8 +2,10 @@
 bin/
 obj/
 publish/
-# Packaged self-contained binary (release artifact, never committed).
-/IPTraceX
+# Packaged self-contained binary (dev publish output, never committed).
+publish/
+# NOTE: the prebuilt Linux x64 runtime at /IPTraceX IS committed
+# intentionally (zero-setup CLI) — do not ignore it.
 # Launcher download cache (populated at runtime, never committed).
 /.iptracex/
 *.user

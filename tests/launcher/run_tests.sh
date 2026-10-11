@@ -25,55 +25,71 @@ is_windows_env() {
   return 1
 }
 
-# --- 1. Fake binary: resolution order + argument forwarding + exit code. ---
-t_fake_binary_exec() {
+# --- 1. Missing binary fails immediately without downloading. ---
+t_missing_binary_fast() {
   if is_windows_env; then
-    echo "SKIP: fake binary exec (Windows cannot exec; platform guard covers it)"
+    echo "SKIP: missing binary (Windows takes platform path first)"
     return
   fi
   local dir; dir="$(mktemp -d)"
   cp "$LAUNCHER" "$dir/iptracex.sh"
-  cat > "$dir/IPTraceX" <<'EOF'
-#!/usr/bin/env bash
-echo "FAKE-EXEC args: $*"
-exit 7
-EOF
-  chmod +x "$dir/IPTraceX"
+  mkdir -p "$dir/fakebin"
+  printf '#!/usr/bin/env bash\necho "NETWORK-USED" >&2\nexit 1\n' > "$dir/fakebin/curl"
+  printf '#!/usr/bin/env bash\necho "NETWORK-USED" >&2\nexit 1\n' > "$dir/fakebin/wget"
+  chmod +x "$dir/fakebin/curl" "$dir/fakebin/wget"
   local out code
   set +e
-  out="$("$dir/iptracex.sh" --version foo 2>&1)"; code=$?
+  out="$(PATH="$dir/fakebin:$PATH" "$dir/iptracex.sh" --version 2>&1)"; code=$?
   set -e
-  if [[ "$out" == "FAKE-EXEC args: --version foo" && "$code" -eq 7 ]]; then
-    pass "fake binary exec + args + exit code"
+  if [[ "$code" -ne 0 && "$out" == *"binary is missing"* \
+    && "$out" == *"Re-clone/re-download"* && "$out" != *"NETWORK-USED"* ]]; then
+    pass "missing binary fails fast without network"
   else
-    fail "fake binary exec (out='$out' code=$code)"
+    fail "missing binary (out='$out' code=$code)"
   fi
   rm -rf "$dir"
 }
 
-# --- 2. Cache precedence over download. ---
-t_cache_precedence() {
+# --- 2. Shipped binary resolves immediately (sourced, offline). ---
+t_shipped_binary_resolved() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  echo "x" > "$dir/IPTraceX"
+  local saved_binary="$BINARY" got
+  BINARY="$dir/IPTraceX"
+  got="$(resolve_binary || true)"
+  BINARY="$saved_binary"
+  if [[ "$got" == "$dir/IPTraceX" ]]; then
+    pass "shipped binary resolves without download"
+  else
+    fail "shipped binary resolution (got='$got')"
+  fi
+  rm -rf "$dir"
+}
+
+# --- 2b. ELF validation accepts real ELF, rejects scripts. ---
+t_elf_validation() {
+  # shellcheck disable=SC1090 # dynamic source of launcher under test
+  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+  local dir; dir="$(mktemp -d)"
+  echo "not-elf" > "$dir/fake.txt"
+  if is_elf_x86_64 "$dir/fake.txt" 2>/dev/null; then
+    fail "elf check accepted text file"
+    rm -rf "$dir"
+    return
+  else
+    pass "elf check rejects non-ELF"
+  fi
   if is_windows_env; then
-    echo "SKIP: cache precedence (Windows cannot exec; platform guard covers it)"
+    echo "SKIP: elf accept (no native ELF handy on Windows)"
+    rm -rf "$dir"
     return
   fi
-  local dir; dir="$(mktemp -d)"
-  cp "$LAUNCHER" "$dir/iptracex.sh"
-  mkdir -p "$dir/.iptracex/bin"
-  cat > "$dir/.iptracex/bin/IPTraceX" <<'EOF'
-#!/usr/bin/env bash
-echo "FAKE-CACHE"
-exit 0
-EOF
-  chmod +x "$dir/.iptracex/bin/IPTraceX"
-  local out
-  set +e
-  out="$("$dir/iptracex.sh" --version 2>&1)"; code=$?
-  set -e
-  if [[ "$out" == "FAKE-CACHE" ]]; then
-    pass "cache used when root binary missing (no download)"
+  if is_elf_x86_64 "/bin/ls" 2>/dev/null || is_elf_x86_64 "/usr/bin/ls" 2>/dev/null; then
+    pass "elf check accepts real x86-64 binary"
   else
-    fail "cache precedence (out='$out')"
+    fail "elf check rejected system binary"
   fi
   rm -rf "$dir"
 }
@@ -251,61 +267,31 @@ t_windows_message() {
   rm -rf "$dir"
 }
 
-# --- 11. Real download → verify → cache → execute (Linux only, network). ---
-# Skipped automatically when the v2.3.0 release assets are unpublished.
-t_real_download_flow() {
+# --- 11. Explicit --update downloads → verifies → installs (Linux, network). ---
+# Skipped automatically when the release assets are unpublished.
+t_update_flow() {
   if is_windows_env; then
-    echo "SKIP: real download (Windows cannot exec ELF)"
+    echo "SKIP: update flow (Windows cannot exec ELF)"
     return
   fi
-  # shellcheck disable=SC1090 # dynamic source of launcher under test
-  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
-  local expect="IPTraceX $APP_VERSION" dir; dir="$(mktemp -d)"
+  local dir; dir="$(mktemp -d)"
   cp "$LAUNCHER" "$dir/iptracex.sh"
   local out code
   set +e
-  out="$("$dir/iptracex.sh" --version 2>&1)"; code=$?
+  out="$("$dir/iptracex.sh" --update 2>&1)"; code=$?
   set -e
-  if [[ "$code" -eq 0 && "$out" == *"$expect"* && -x "$dir/.iptracex/bin/IPTraceX" ]]; then
-    pass "download+verify+cache+exec"
+  if [[ "$code" -eq 0 && -x "$dir/IPTraceX" ]]; then
+    # shellcheck disable=SC1090 # dynamic source of launcher under test
+    source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
+    if is_elf_x86_64 "$dir/IPTraceX" 2>/dev/null; then
+      pass "update downloads+verifies+installs ELF"
+    else
+      fail "update installed non-ELF"
+    fi
+  elif [[ "$out" == *"HTTP 404"* ]]; then
+    echo "SKIP: update flow (release assets unpublished)"
   else
-    fail "download flow (out='$out' code=$code)"
-    rm -rf "$dir"
-    return
-  fi
-  local before after
-  before="$(stat -c %Y "$dir/.iptracex/bin/IPTraceX")"
-  sleep 1
-  set +e
-  out="$("$dir/iptracex.sh" --version 2>&1)"; code=$?
-  set -e
-  after="$(stat -c %Y "$dir/.iptracex/bin/IPTraceX")"
-  if [[ "$code" -eq 0 && "$before" == "$after" && "$out" == *"$expect"* ]]; then
-    pass "second run uses cache (no re-download)"
-  else
-    fail "cache reuse (out='$out' code=$code)"
-  fi
-  rm -rf "$dir"
-}
-
-# --- 12. Local binary resolution without download (sourced, offline). ---
-t_local_binary_resolved() {
-  if is_windows_env; then
-    echo "SKIP: local binary resolution (Windows FS ignores chmod +x here)"
-    return
-  fi  # shellcheck disable=SC1090 # dynamic source of launcher under test
-  source "$LAUNCHER" <<<"" >/dev/null 2>&1 || true
-  local dir; dir="$(mktemp -d)"
-  mkdir -p "$dir/.iptracex/bin"
-  echo "x" > "$dir/IPTraceX"; chmod +x "$dir/IPTraceX"
-  local saved_script="$SCRIPT_DIR" saved_cache="$CACHE_BIN" got
-  SCRIPT_DIR="$dir" CACHE_BIN="$dir/.iptracex/bin/IPTraceX"
-  got="$(resolve_binary || true)"
-  SCRIPT_DIR="$saved_script" CACHE_BIN="$saved_cache"
-  if [[ "$got" == "$dir/IPTraceX" ]]; then
-    pass "local binary found first (no download)"
-  else
-    fail "local binary resolution (got='$got')"
+    fail "update flow (out='$out' code=$code)"
   fi
   rm -rf "$dir"
 }
@@ -399,8 +385,9 @@ t_checksum_mismatch_message() {
   rm -rf "$dir"
 }
 
-t_fake_binary_exec
-t_cache_precedence
+t_missing_binary_fast
+t_shipped_binary_resolved
+t_elf_validation
 t_checksum_verify
 t_untrusted_url_refused
 t_header_content
@@ -409,8 +396,7 @@ t_download_error_visible
 t_clear_behavior
 t_arch_gate
 t_windows_message
-t_real_download_flow
-t_local_binary_resolved
+t_update_flow
 t_http_404_fast
 t_timeout_fast
 t_network_failure_fast

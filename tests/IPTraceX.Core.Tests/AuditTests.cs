@@ -171,9 +171,10 @@ public sealed class AuditSinkTests
             var old = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
             sink.Append(Ev() with { TimestampUtc = old });
             sink.Append(Ev());
-            sink.PurgeOld(new DateTimeOffset(2026, 10, 8, 0, 0, 0, TimeSpan.Zero));
+            string today = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+            sink.PurgeOld(DateTimeOffset.UtcNow);
             Assert.False(Directory.Exists(Path.Combine(dir, "logs", "2020-01-01")));
-            Assert.True(Directory.Exists(Path.Combine(dir, "logs", "2026-10-08")));
+            Assert.True(Directory.Exists(Path.Combine(dir, "logs", today)));
         }
         finally
         {

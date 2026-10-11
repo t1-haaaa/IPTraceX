@@ -28,6 +28,12 @@ Format follows Keep a Changelog; versions follow SemVer.
   migration, `/api/health` checks, secrets via `sync: false`);
   no worker/cron (none required — documented); production CLI wiring
   via `IPTRACEX_AUDIT_ENDPOINT`/`IPTRACEX_AUDIT_SECRET`.
+- feat: true zero-setup CLI — the repository ships the prebuilt Linux
+  x64 runtime (`./IPTraceX`, reproducible via `dotnet publish -r
+  linux-x64`); the launcher never downloads/compiles/installs at
+  startup, validates the ELF, and fails fast with a clear message if
+  the binary is missing; `--update` remains an explicit opt-in
+  (SHA256-verified) and download errors fail fast (404/403/timeout).
 
 ## 2.2.0 — 2026-10-08
 
